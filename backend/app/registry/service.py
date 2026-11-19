@@ -62,8 +62,8 @@ def seed_registry(session: Session) -> dict[str, int]:
     def add_mapping(scheme: str, code: str, entity_type: str, entity_id: int, notes: str | None = None) -> None:
         stmt = insert(SourceCodeMapping).values(
             scheme=scheme, code=code, entity_type=entity_type, entity_id=entity_id, notes=notes
-        ).on_conflict_do_nothing(index_elements=["scheme", "code"])
-        if session.execute(stmt).rowcount:
+        ).on_conflict_do_nothing(index_elements=["scheme", "code"]).returning(SourceCodeMapping.id)
+        if session.execute(stmt).first():
             stats["mappings"] += 1
 
     for c in data["countries"]:

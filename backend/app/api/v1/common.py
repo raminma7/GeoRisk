@@ -87,7 +87,7 @@ def iso(dt: datetime | date | None) -> str | None:
 
 def ser_country(c: Country, region_names: dict[int, str] | None = None) -> dict:
     rn = region_names or {}
-    return {"iso3": c.iso3, "iso2": c.iso2, "name": c.name, "official_name": c.official_name,
+    return {"iso3": c.iso3, "iso2": c.iso2, "iso_numeric": c.iso_numeric, "name": c.name, "official_name": c.official_name,
             "region": rn.get(c.subregion_id) if c.subregion_id else None,
             "continent": rn.get(c.continent_id) if c.continent_id else None, "is_historical": c.is_historical}
 

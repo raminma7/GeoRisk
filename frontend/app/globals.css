@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens. Chart series/status values follow the validated reference
+   palette (dataviz skill); dark values are selected steps, not a flip. */
+:root {
+  color-scheme: light;
+  --bg: 244 244 242; --surface: 252 252 251; --raised: 255 255 255; --line: 226 225 220;
+  --ink: 11 11 11; --ink2: 82 81 78; --muted: 120 119 114; --accent: 42 120 214;
+  --crit: 208 59 59; --serious: 236 131 90; --warn: 250 178 25; --good: 12 163 12;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+  --chart-surface: #fcfcfb; --chart-grid: #e6e5e0; --chart-text: #52514e;
+  --land: #e4e3de; --land-active: #cdd9ea; --water: #f4f6f8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: 17 17 16; --surface: 26 26 25; --raised: 33 33 31; --line: 52 52 49;
+    --ink: 240 239 236; --ink2: 195 194 183; --muted: 150 149 141; --accent: 57 135 229;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+    --chart-surface: #1a1a19; --chart-grid: #2e2e2b; --chart-text: #c3c2b7;
+    --land: #2c2c29; --land-active: #24354d; --water: #141413;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: 17 17 16; --surface: 26 26 25; --raised: 33 33 31; --line: 52 52 49;
+  --ink: 240 239 236; --ink2: 195 194 183; --muted: 150 149 141; --accent: 57 135 229;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+  --chart-surface: #1a1a19; --chart-grid: #2e2e2b; --chart-text: #c3c2b7;
+  --land: #2c2c29; --land-active: #24354d; --water: #141413;
+}
+
+html, body { background: rgb(var(--bg)); color: rgb(var(--ink)); }
+body { font-feature-settings: "tnum" 1; }
+a { color: inherit; }
+.card { @apply rounded-xl border border-line bg-surface p-4; }
+.h2 { @apply text-sm font-semibold uppercase tracking-wide text-ink2; }
+.btn { @apply inline-flex items-center gap-1 rounded-lg border border-line bg-raised px-3 py-1.5 text-sm hover:border-accent disabled:opacity-50; }
+.btn-primary { @apply inline-flex items-center gap-1 rounded-lg border border-accent bg-accent px-3 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50; }
+.input { @apply rounded-lg border border-line bg-raised px-3 py-1.5 text-sm outline-none focus:border-accent; }
+.link { @apply text-accent hover:underline; }
+.maplibregl-popup-content { background: rgb(var(--raised)) !important; color: rgb(var(--ink)); border-radius: 8px !important; }
+.maplibregl-popup-tip { display: none; }
