@@ -28,6 +28,22 @@ alerts and keeps a full history for machine learning. The dashboard populates it
 - Further docs: [`docs/architecture.md`](docs/architecture.md) · [`docs/methodology.md`](docs/methodology.md) ·
   [`docs/data-sources.md`](docs/data-sources.md) · [`docs/economy-roadmap.md`](docs/economy-roadmap.md)
 
+## Early warning (experimental ML)
+A separate **model service** ([`model-service/`](model-service)) serves a model that ranks countries without recent
+conflict by their risk of a **new** conflict (≥ 25 deaths within 3 months) over the next window. It's trained on UCDP
+history plus neighbours, politics, economy and news trends; out-of-time ROC-AUC is 0.89, and 7 in 10 new conflicts
+(2013–2025) were in its monthly top 20. Predictions run monthly and are stored, then shown on the **Early warning**
+page, the homepage, country pages and crisis pages (spillover). Details:
+[`docs/ml-enrichment-results.md`](docs/ml-enrichment-results.md).
+
+```bash
+docker compose exec api python -m app.cli train-onset-model
+```
+
+```bash
+docker compose exec api python -m app.cli predict-onsets
+```
+
 ## Quick start (Docker Compose)
 
 ```bash

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 const ITEMS = [
   { href: "/", label: "Overview" },
+  { href: "/early-warning", label: "Early warning" },
   { href: "/geopolitics", label: "Geopolitics" },
   { href: "/economy", label: "Economy", planned: true },
   { href: "/news", label: "News & Events" },

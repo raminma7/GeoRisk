@@ -5,6 +5,7 @@ import Link from "next/link";
 import { use, useState } from "react";
 import { ComponentBars, DailyStack, PriorityHistory } from "@/components/Charts";
 import { AnalysisPanel, ClusterRow, type Cluster, type CrisisCard } from "@/components/domain";
+import { SpilloverCard, type Prediction } from "@/components/EarlyWarning";
 import { Card, Confidence, CountryChips, Direction, Disclaimer, Empty, LevelBadge, Loading, SourceLink, State, Tabs, Verification } from "@/components/ui";
 import { post, qs, useApi } from "@/lib/api";
 import { ago, fmtDate, label, num } from "@/lib/format";
@@ -20,6 +21,7 @@ type Detail = CrisisCard & {
   evidence_log: { action: string; reason: string; created_at: string; algorithm_version: string; evidence: Record<string, unknown> }[];
   related_articles: { id: number; title: string; url: string; domain: string; language: string; source_country: string; seen_at: string }[];
   review: { needs_review: boolean; note: string | null; reviewed_by: string | null };
+  spillover_risk: Prediction[];
 };
 type Timeline = { events: { total: number; items: Cluster[] }; verification_breakdown: Record<string, number>;
   verification_legend: Record<string, string>; daily: { date: string; material_conflict: number; verbal_conflict: number; cooperation: number }[];
@@ -90,9 +92,12 @@ export default function CrisisPage({ params }: { params: Promise<{ id: string }>
                     Review priority — not a probability of conflict.</Disclaimer>
                 </>) : <Empty>Not scored yet.</Empty>}
               </Card>
-              <Card title="Location">
-                <WorldMap crises={[c]} events={mapEvents.data?.features} height={280} fitTo={pts.length ? pts : undefined} />
-              </Card>
+              <div className="space-y-4">
+                <Card title="Location">
+                  <WorldMap crises={[c]} events={mapEvents.data?.features} height={280} fitTo={pts.length ? pts : undefined} />
+                </Card>
+                {c.spillover_risk?.length > 0 && <SpilloverCard items={c.spillover_risk} />}
+              </div>
               <Card title="Daily documented activity" className="lg:col-span-2">
                 <State {...t} what="timeline">{(tl) => tl.daily.length ? <DailyStack data={tl.daily} /> : <Empty>No dated evidence.</Empty>}</State>
               </Card>

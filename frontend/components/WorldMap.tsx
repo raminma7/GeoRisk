@@ -18,17 +18,42 @@ function cssVar(name: string, fallback: string) {
 }
 
 // A self-contained basemap: Natural Earth 110m country polygons (public domain, via world-atlas). No tile server.
-const LAND = feature(countries110 as never, (countries110 as never as { objects: { countries: never } }).objects.countries) as unknown as GeoJSON.FeatureCollection;
+const LAND_RAW = feature(countries110 as never, (countries110 as never as { objects: { countries: never } }).objects.countries) as unknown as GeoJSON.FeatureCollection;
 
-export default function WorldMap({ crises = [], events, highlight = [], height = 420, onCrisisClick, fitTo }: {
+// Rings that cross the antimeridian (Russia, Fiji) jump from +180 to -180 and render as a band across the
+// map; shift their western points by +360° so each ring stays continuous. Antarctica is left as is.
+function unwrapAntimeridian(fc: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection {
+  const fixRing = (ring: number[][]) => {
+    const jumps = ring.some((p, i) => i > 0 && Math.abs(p[0] - ring[i - 1][0]) > 180);
+    return jumps ? ring.map(([x, y]) => [x < 0 ? x + 360 : x, y]) : ring;
+  };
+  return {
+    ...fc,
+    features: fc.features.map((f) => {
+      if (String(f.id) === "010" || !f.geometry) return f;
+      const g = f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+      const coordinates = g.type === "Polygon"
+        ? g.coordinates.map((r) => fixRing(r as number[][]))
+        : g.coordinates.map((poly) => poly.map((r) => fixRing(r as number[][])));
+      return { ...f, geometry: { ...g, coordinates } as GeoJSON.Geometry };
+    }),
+  };
+}
+const LAND = unwrapAntimeridian(LAND_RAW);
+
+export default function WorldMap({ crises = [], events, highlight = [], height = 420, onCrisisClick, fitTo, fills, onCountryClick, fillTitles }: {
   crises?: CrisisMarker[]; events?: EventFeature[]; highlight?: (number | string)[]; height?: number;
   onCrisisClick?: (id: number) => void; fitTo?: [number, number][];
+  /** choropleth: ISO numeric id -> color */
+  fills?: Record<string, string>; onCountryClick?: (isoNumeric: string) => void;
+  /** tooltip text per ISO numeric id (choropleth mode) */
+  fillTitles?: Record<string, string>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const ready = useRef(false);
-  const latest = useRef({ crises, events, highlight });
-  latest.current = { crises, events, highlight };
+  const latest = useRef({ crises, events, highlight, fills, fillTitles, onCountryClick });
+  latest.current = { crises, events, highlight, fills, fillTitles, onCountryClick };
 
   const sync = () => {
     const m = map.current;
@@ -44,6 +69,12 @@ export default function WorldMap({ crises = [], events, highlight = [], height =
     (m.getSource("events") as GeoJSONSource)?.setData({ type: "FeatureCollection", features: (ev || []) as never });
     const hset = new Set(hl.map((x) => String(x).padStart(3, "0")));
     m.setFilter("land-active", ["in", ["get", "_id"], ["literal", Array.from(hset)]]);
+    const f = latest.current.fills;
+    if (f && Object.keys(f).length) {
+      const pairs = Object.entries(f).flatMap(([k, v]) => [k.padStart(3, "0"), v]);
+      m.setPaintProperty("land-risk", "fill-color", ["match", ["get", "_id"], ...pairs, "rgba(0,0,0,0)"] as never);
+      m.setPaintProperty("land-risk", "fill-opacity", 1);
+    }
   };
 
   useEffect(() => {
@@ -63,6 +94,7 @@ export default function WorldMap({ crises = [], events, highlight = [], height =
           { id: "land", type: "fill", source: "land", paint: { "fill-color": cssVar("--land", "#e4e3de") } },
           { id: "land-active", type: "fill", source: "land", filter: ["in", ["get", "_id"], ["literal", []]],
             paint: { "fill-color": cssVar("--land-active", "#cdd9ea") } },
+          { id: "land-risk", type: "fill", source: "land", paint: { "fill-color": "rgba(0,0,0,0)", "fill-opacity": 0 } },
           { id: "borders", type: "line", source: "land", paint: { "line-color": cssVar("--chart-surface", "#fff"), "line-width": 0.6 } },
           { id: "events", type: "circle", source: "events", paint: {
             "circle-radius": ["interpolate", ["linear"], ["get", "severity"], 0, 2.5, 1, 5],
@@ -105,6 +137,21 @@ export default function WorldMap({ crises = [], events, highlight = [], height =
       });
       m.on("mouseleave", layer, () => { m.getCanvas().style.cursor = ""; popup.remove(); });
     }
+    m.on("mousemove", "land-risk", (e) => {
+      const t = latest.current.fillTitles;
+      const id = String(e.features?.[0]?.properties?._id ?? "");
+      if (!t || !t[id] || m.queryRenderedFeatures(e.point, { layers: ["crises", "events"] }).length) return;
+      m.getCanvas().style.cursor = "pointer";
+      const div = document.createElement("div");
+      div.style.fontSize = "12px";
+      div.textContent = t[id];
+      popup.setLngLat(e.lngLat).setDOMContent(div).addTo(m);
+    });
+    m.on("mouseleave", "land-risk", () => { m.getCanvas().style.cursor = ""; popup.remove(); });
+    m.on("click", "land-risk", (e) => {
+      const id = String(e.features?.[0]?.properties?._id ?? "");
+      if (id && latest.current.onCountryClick && latest.current.fillTitles?.[id]) latest.current.onCountryClick(id);
+    });
     m.on("click", "crises", (e) => {
       const id = Number(e.features?.[0]?.properties?.id);
       if (id && onCrisisClick) onCrisisClick(id);
@@ -114,7 +161,7 @@ export default function WorldMap({ crises = [], events, highlight = [], height =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { sync(); }, [crises, events, highlight]);
+  useEffect(() => { sync(); }, [crises, events, highlight, fills]);
 
   useEffect(() => {
     const m = map.current;

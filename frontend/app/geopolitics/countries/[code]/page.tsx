@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use, useState } from "react";
 import { DailyStack } from "@/components/Charts";
 import { AnalysisPanel, PriorityCard, type CrisisCard } from "@/components/domain";
+import { CountryRiskCard } from "@/components/EarlyWarning";
 import { Card, Empty, SourceLink, State, Stat, Tabs, Verification } from "@/components/ui";
 import { qs, useApi } from "@/lib/api";
 import { ago, label, num } from "@/lib/format";
@@ -16,6 +17,7 @@ type Country = {
     verbal_cooperation: number; material_cooperation: number; avg_goldstein: number | null }[];
   timeline: { date: string; material_conflict: number; verbal_conflict: number; cooperation: number }[];
   modules: { economy: { status: string } };
+  ml_risk: Parameters<typeof CountryRiskCard>[0]["risk"];
 };
 type Ev = { id: number; event_date: string; available_at: string; category_label: string; actor1: { name: string; country: string };
   actor2: { name: string; country: string }; location: { name: string; country: string }; source_url: string; verification_status: string;
@@ -49,6 +51,7 @@ export default function CountryPage({ params }: { params: Promise<{ code: string
             { id: "analysis", label: "AI analysis" }, { id: "economy", label: "Economy (planned)", disabled: true }]} />
 
           {tab === "overview" && (<>
+            <CountryRiskCard risk={c.ml_risk} />
             <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
               {(["clusters", "material_conflict", "verbal_conflict", "diplomatic_signals", "cooperation"] as const).map((k) => (
                 <Stat key={k} label={`${label(k)} (24h)`} value={num(v[k]?.value)}

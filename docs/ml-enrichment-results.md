@@ -64,3 +64,44 @@ cd backend && python scripts/run_enriched_experiment.py --out ./out
 ```
 
 The factor files are downloaded to `/var/tmp/georisk/factors` (see `app/ml/enrichment.py` for the URLs).
+
+---
+
+# Update: clean "new war" labels, final model and early warning (2026-11-19)
+
+## Clean labels (`onset-major-v1`)
+The earlier "onset" label counted any single incident after 12 quiet months (e.g. NLD 2015-12, GBR 2019-04).
+New definition: **no UCDP state-based deaths in the previous 24 months, then ≥ 25 deaths (UCDP best estimate) in
+months t..t+2.** Smaller events are kept as `minor_incident`.
+
+Result: 155 labelled onset months (~55 outbreaks: e.g. Ukraine 2014, Kyrgyzstan–Tajikistan 2021, Haiti 2024,
+Cambodia–Thailand 2025, Venezuela 2025) and 402 minor incidents that no longer count as new wars. Full list:
+[`docs/samples/onsets_list.csv`](samples/onsets_list.csv).
+
+Fighting history now runs to **September 2026**: GED 26.1 plus the UCDP **Candidate** monthly release
+(preliminary; it never replaces official data).
+
+## Retrained from zero (walk-forward 2013–2025, 34 onset months tested)
+A default LightGBM memorised the ~150 positives (out-of-time ROC ≈ 0.5). A small, heavily regularised model
+(depth-2 trees, ≥ 150 rows per leaf, subsampling) generalises:
+
+| Model | Features | ROC-AUC (95% CI) | New wars in monthly top 20 |
+|---|---|---|---|
+| History only | 12 | 0.73 (0.62–0.82) | 50% |
+| + neighbours, politics, economy | 33 | 0.89 (0.86–0.92) | 68% |
+| **+ selected change signals (final)** | 43 | **0.89 (0.85–0.93)** | **71%** |
+
+The model type was chosen by comparing 3 configurations on the same test years, so these numbers are slightly
+optimistic. Precision stays low (new wars are ~0.2% of quiet country-months): this is a watch list, not a
+forecast.
+
+## Separate model service and use in the app
+- Package: `<MODEL_DIR>/conflict_onset/<version>/` (`model.txt`, `calibrator.json` (Platt, out-of-time),
+  `metadata.json`), written by `python -m app.cli train-onset-model`.
+- Service: [`model-service/`](../model-service) (stand-alone FastAPI: `/predict`, `/models`, `/health`, `/reload`).
+- Monthly job (`ml_monthly_early_warning`, or `python -m app.cli predict-onsets`): newest UCDP Candidate data →
+  news archive → factor rows → one batch call to the service → `ml_predictions`. Pages read stored results only
+  (the app works with the service offline).
+- UI: **Early warning** page (risk map, ranked watch list with plain-language reasons), homepage top-5 strip,
+  country risk card (gauge, rank, reasons, trend), crisis "spillover risk" for uninvolved neighbours, and
+  info-level alerts when a country enters the top 10. The model is not used in the crisis priority score.

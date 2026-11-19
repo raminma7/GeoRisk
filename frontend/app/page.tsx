@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ClusterRow, CrisisCard, PriorityCard, type Cluster } from "@/components/domain";
+import { WatchListStrip, type Prediction } from "@/components/EarlyWarning";
 import { Card, Disclaimer, Empty, ErrorBox, LevelBadge, Loading, Stale, Stat, Verification } from "@/components/ui";
 import { qs, useApi } from "@/lib/api";
 import { ago, label, num } from "@/lib/format";
@@ -18,6 +19,7 @@ type Overview = {
   latest_reports: { id: number; scope_type: string; scope_key: string; created_at: string; summary: string | null }[];
   data_freshness: Record<string, { last_success_at: string | null; stale: boolean | null } | string | null>;
   ai_enabled: boolean; disclaimer: string;
+  early_warning: null | { window: { start: string; end: string }; data_through: string; items: Prediction[] };
 };
 
 const CATEGORIES = [["", "All categories"], ["fight", "Fight"], ["assault", "Assault"], ["mass_violence", "Mass violence"],
@@ -107,6 +109,8 @@ export default function OverviewPage() {
           : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{data.priority_situations.map((c) => <PriorityCard key={c.id} c={c} />)}</div>}
         <Disclaimer>{data.disclaimer}</Disclaimer>
       </section>
+
+      {data.early_warning && data.early_warning.items.length > 0 && <WatchListStrip data={data.early_warning} />}
 
       <div className="grid gap-4 xl:grid-cols-3">
         <Card title="Latest developments" className="xl:col-span-2">
