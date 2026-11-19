@@ -48,8 +48,10 @@ FEATURES = [
 TARGET = "state_based_event"
 
 
-def build_frame(cm: pd.DataFrame, horizon: int = 1) -> pd.DataFrame:
-    """Country-month frame: lagged features (strictly before month t) + forward label [t, t+h)."""
+def build_frame(cm: pd.DataFrame, horizon: int = 1, keep_unlabeled: bool = False) -> pd.DataFrame:
+    """Country-month frame: lagged features (strictly before month t) + forward label [t, t+h).
+
+    ``keep_unlabeled`` keeps rows whose label is not yet known (forecast rows)."""
     frames = []
     for iso, g in cm.sort_values("month").groupby("iso3"):
         g = g.reset_index(drop=True)
@@ -67,7 +69,9 @@ def build_frame(cm: pd.DataFrame, horizon: int = 1) -> pd.DataFrame:
         frames.append(f)
     feats = pd.concat(frames, ignore_index=True)
     labels = compute_labels(cm, horizon)[["iso3", "month", TARGET]]
-    df = feats.merge(labels, on=["iso3", "month"], how="inner").dropna(subset=[TARGET])
+    df = feats.merge(labels, on=["iso3", "month"], how="left" if keep_unlabeled else "inner")
+    if not keep_unlabeled:
+        df = df.dropna(subset=[TARGET])
     df = df.iloc[12:] if len(df) > 12 else df
     return df.dropna(subset=["sb_events_l1"]).reset_index(drop=True)
 

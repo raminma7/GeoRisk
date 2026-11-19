@@ -92,3 +92,29 @@ class ModelEvaluation(Base):
     baseline_metrics: Mapped[dict] = mapped_column(JSONB, default=dict)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class MlPrediction(Base):
+    """Stored output of a model-service batch run (read by the app; the service itself is never on the page path)."""
+
+    __tablename__ = "ml_predictions"
+    __table_args__ = (
+        UniqueConstraint("model_name", "model_version", "iso3", "window_start"),
+        Index("ix_ml_predictions_window", "model_name", "window_start"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    model_name: Mapped[str] = mapped_column(String(80))
+    model_version: Mapped[str] = mapped_column(String(80))
+    iso3: Mapped[str] = mapped_column(String(3), index=True)
+    window_start: Mapped[date] = mapped_column(Date)
+    window_end: Mapped[date] = mapped_column(Date)
+    data_through: Mapped[date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(30))  # predicted | ongoing_conflict
+    probability: Mapped[float | None] = mapped_column(Float)
+    raw_score: Mapped[float | None] = mapped_column(Float)
+    rank: Mapped[int | None] = mapped_column(Integer)
+    out_of: Mapped[int | None] = mapped_column(Integer)
+    times_average: Mapped[float | None] = mapped_column(Float)
+    level: Mapped[str | None] = mapped_column(String(20))  # very_high | high | elevated | low
+    reasons: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)

@@ -13,6 +13,7 @@ point-in-time feature construction never sees a release before it existed.
 from __future__ import annotations
 
 import csv
+import re
 import hashlib
 import io
 import zipfile
@@ -103,13 +104,20 @@ class UcdpGedConnector:
         yield from csv.DictReader(io.StringIO(text))
 
     def import_version(self, version: str | None = None, min_year: int | None = None, path: str | None = None,
-                       released_at: datetime | None = None) -> dict:
+                       released_at: datetime | None = None, url: str | None = None, candidate: bool = False) -> dict:
+        """Import a GED release. ``candidate=True`` marks UCDP Candidate (preliminary monthly) data: it extends
+        coverage past the last official release but never replaces it (see ``latest_version``)."""
         version = version or self.settings.ucdp_ged_version
         min_year = min_year if min_year is not None else self.settings.ucdp_min_year
         with ingestion_run(self.session, self.source.id, "ucdp_ged.import", version=version) as run:
             if path:
                 payload = Path(path).read_bytes()
                 url, released = f"file://{path}", released_at or self._release_date(version, Path(path))
+            elif url:
+                resp = http.fetch(url)
+                payload = resp.content
+                lm = resp.headers.get("last-modified")
+                released = parsedate_to_datetime(lm) if lm else None
             else:
                 payload, released, url = self._download(version)
             released = released or released_at or utcnow()
@@ -119,7 +127,7 @@ class UcdpGedConnector:
             if dv is None:
                 dv = DatasetVersion(data_source_id=self.source.id, version=version, released_at=released,
                                     citation=f"UCDP GED version {version}. {UCDP_CITATION}", source_url=url,
-                                    checksum=checksum, meta={"min_year": min_year})
+                                    checksum=checksum, meta={"min_year": min_year, "candidate": candidate})
                 self.session.add(dv)
                 self.session.flush()
             elif dv.checksum and dv.checksum != checksum:
@@ -173,20 +181,48 @@ class UcdpGedConnector:
         self.session.commit()
         return n
 
+    def import_latest_candidate(self) -> dict:
+        """Import the newest cumulative UCDP Candidate file (e.g. GEDEvent_v26_01_26_09.csv = Jan–Sep 2026)."""
+        html = http.fetch(f"{self.settings.ucdp_downloads_url}/").text
+        names = sorted(set(re.findall(r"candidateged/(GEDEvent_v\d+_01_\d+_\d+\.csv)", html)))
+        if not names:
+            return {"status": "no_candidate_file_found"}
+        name = names[-1]
+        version = "candidate-" + name.removeprefix("GEDEvent_").removesuffix(".csv")
+        exists = self.session.scalar(select(DatasetVersion).where(DatasetVersion.data_source_id == self.source.id,
+                                                                  DatasetVersion.version == version))
+        if exists and exists.record_count:
+            return {"version": version, "status": "already_imported"}
+        return self.import_version(version, min_year=2000, url=f"{self.settings.ucdp_downloads_url}/candidateged/{name}",
+                                   candidate=True)
+
     def check_and_import_configured(self) -> dict:
-        """Scheduled: import the configured release if not yet present (UCDP publishes ~annually)."""
+        """Scheduled: import the configured release (annual) and the newest Candidate file (monthly)."""
         v = self.settings.ucdp_ged_version
         exists = self.session.scalar(select(DatasetVersion).where(DatasetVersion.data_source_id == self.source.id,
                                                                   DatasetVersion.version == v))
-        if exists and exists.record_count:
-            return {"version": v, "status": "already_imported"}
-        return self.import_version(v)
+        out = {"version": v, "status": "already_imported"} if exists and exists.record_count else self.import_version(v)
+        try:
+            out["candidate"] = self.import_latest_candidate()
+        except Exception as exc:  # noqa: BLE001 - candidate data is optional
+            out["candidate"] = {"status": "failed", "error": str(exc)[:300]}
+        return out
+
+
+def _versions(session: Session) -> list[DatasetVersion]:
+    src = get_source(session, SOURCE_KEY)
+    return list(session.scalars(select(DatasetVersion).where(DatasetVersion.data_source_id == src.id)
+                                .order_by(DatasetVersion.released_at.desc().nulls_last())))
 
 
 def latest_version(session: Session) -> DatasetVersion | None:
-    src = get_source(session, SOURCE_KEY)
-    return session.scalar(select(DatasetVersion).where(DatasetVersion.data_source_id == src.id)
-                          .order_by(DatasetVersion.released_at.desc().nulls_last()).limit(1))
+    """Newest *official* GED release (Candidate files are excluded)."""
+    return next((v for v in _versions(session) if not (v.meta or {}).get("candidate")), None)
+
+
+def latest_candidate(session: Session) -> DatasetVersion | None:
+    """Newest UCDP Candidate (preliminary) import, if any."""
+    return next((v for v in _versions(session) if (v.meta or {}).get("candidate")), None)
 
 
 def as_utc(d: date) -> datetime:

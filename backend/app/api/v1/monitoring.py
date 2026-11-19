@@ -88,6 +88,23 @@ def freshness(s: Session) -> dict:
     return out
 
 
+def _early_warning(s: Session) -> dict | None:
+    from app.api.v1.predictions import _meta
+    from app.ml import predictions as P
+    from app.ml.models import MlPrediction
+    from app.registry.models import Country
+
+    lw = P.latest_window(s)
+    if not lw:
+        return None
+    rows = s.execute(select(MlPrediction, Country.name).join(Country, Country.iso3 == MlPrediction.iso3)
+                     .where(MlPrediction.model_version == lw[0], MlPrediction.window_start == lw[1],
+                            MlPrediction.status == "predicted").order_by(MlPrediction.rank).limit(5)).all()
+    meta = _meta(s)
+    return {"window": meta["window"], "data_through": meta["data_through"], "model_version": lw[0],
+            "items": [P.ser(p, n) for p, n in rows]}
+
+
 @router.get("/overview", summary="Automatic global intelligence overview (no country selection needed)")
 def overview(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     since = utcnow() - timedelta(hours=24)
@@ -120,6 +137,7 @@ def overview(s: Session = Depends(get_db), _: Principal = Depends(require_read))
                             "summary": (r.output or {}).get("summary"), "provider": r.provider, "model": r.model}
                            for r in reports],
         "data_freshness": freshness(s),
+        "early_warning": _early_warning(s),
         "ai_enabled": get_settings().ai_provider != "none",
         "disclaimer": "Events are machine-extracted from news reports (GDELT) and are not independently verified. "
                       "Priority scores indicate analyst review priority, not probabilities of conflict.",

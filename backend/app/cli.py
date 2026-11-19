@@ -9,6 +9,8 @@
     python -m app.cli import-ucdp [--version 26.1] [--min-year 2015]
     python -m app.cli snapshots [--date 2026-11-18]
     python -m app.cli backfill-news-history --start 1988 --end 2025   # GDELT 1.0 archive -> country-month news
+    python -m app.cli train-onset-model                              # clean labels -> model package
+    python -m app.cli predict-onsets                                 # model service -> ml_predictions
     python -m app.cli labels [--horizon 1] [--start 2010-01-01]
     python -m app.cli train-baseline
     python -m app.cli analyze-crisis CRISIS_ID
@@ -112,6 +114,21 @@ def cmd_backfill_news_history(args) -> dict:
     return backfill(args.start, args.end, workers=args.workers, max_files=args.max_files)
 
 
+def cmd_train_onset_model(args) -> dict:
+    from app.ml.onset_model import train_and_export
+
+    with session_scope() as s:
+        r = train_and_export(s, variant=args.variant)
+    return {k: v for k, v in r.items() if k != "results"} | {"test": r["results"][r["variant"]]}
+
+
+def cmd_predict_onsets(_args) -> dict:
+    from app.ml.predictions import run_predictions
+
+    with session_scope() as s:
+        return run_predictions(s)
+
+
 def cmd_labels(args) -> dict:
     from app.ml.labels import store_labels
 
@@ -171,6 +188,10 @@ def main() -> None:
     x.add_argument("--workers", type=int, default=4)
     x.add_argument("--max-files", type=int, default=None)
     x.set_defaults(fn=cmd_backfill_news_history)
+    x = sub.add_parser("train-onset-model")
+    x.add_argument("--variant", default=None)
+    x.set_defaults(fn=cmd_train_onset_model)
+    sub.add_parser("predict-onsets").set_defaults(fn=cmd_predict_onsets)
     x = sub.add_parser("labels")
     x.add_argument("--horizon", type=int, default=1)
     x.add_argument("--start", default=None)

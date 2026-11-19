@@ -54,6 +54,15 @@ def list_crises(status: str | None = Query(None, description="candidate|active|d
     return paginate(s, q.order_by(order), p, lambda c: ser_crisis_card(c, regions.get(c.region_id), names))
 
 
+def _spillover(s: Session, crisis_id: str) -> list[dict]:
+    from app.api.v1.predictions import crisis_spillover
+
+    try:
+        return crisis_spillover(s, crisis_id)
+    except Exception:  # noqa: BLE001 - optional enrichment must never break the crisis page
+        return []
+
+
 @router.get("/{crisis_id}", summary="Crisis detail with participants, priority explanation and evidence trail")
 def crisis_detail(crisis_id: str, s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     c = get_crisis(s, crisis_id)
@@ -83,6 +92,7 @@ def crisis_detail(crisis_id: str, s: Session = Depends(get_db), _: Principal = D
                           "algorithm_version": e.algorithm_version} for e in log],
         "related_articles": [ser_article(a) for a in arts],
         "review": {"needs_review": c.needs_review, "note": c.review_note, "reviewed_by": c.reviewed_by},
+        "spillover_risk": _spillover(s, str(c.id)),
         "meta": c.meta,
     }
 

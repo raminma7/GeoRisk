@@ -146,6 +146,23 @@ def _ucdp_history(session: Session, iso3s: list[str], years: int = 5) -> dict:
     return {"source": "UCDP GED (human-coded research dataset)", "window_years": years, "by_country": out} if out else {}
 
 
+def _model_estimates(session: Session, iso3s: list[str]) -> dict:
+    """Experimental ML onset-risk estimates (clearly labelled; never treated as evidence of events)."""
+    try:
+        from app.api.v1.predictions import latest_for
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for i in iso3s:
+        p = latest_for(session, i)
+        if p is not None and p.status == "predicted":
+            out[i] = {"risk_vs_average": p.times_average, "level": p.level, "window": f"{p.window_start}..{p.window_end}",
+                      "top_factors": [f"{r['label']}: {r['value']} ({r['direction']} risk)" for r in (p.reasons or [])[:3]]}
+        elif p is not None:
+            out[i] = {"status": "ongoing conflict (onset model not applicable)"}
+    return {"note": "Experimental statistical model of new-conflict risk; not evidence of events.", "by_country": out} if out else {}
+
+
 def crisis_bundle(session: Session, crisis: Crisis) -> EvidenceBundle | None:
     limit = get_settings().ai_max_evidence_items
     allowed = _ai_allowed_sources(session)
@@ -172,6 +189,7 @@ def crisis_bundle(session: Session, crisis: Crisis) -> EvidenceBundle | None:
                                                                          "direction": crisis.direction},
         "recent_system_decisions": [sanitize(x.reason, 300) for x in log],
         "historical_context": _ucdp_history(session, countries) if "ucdp_ged" in allowed else {},
+        "experimental_model_estimates": _model_estimates(session, countries),
     }
     return EvidenceBundle(scope=f"crisis:{crisis.id}", items=items, context=ctx)
 
@@ -206,6 +224,7 @@ def countries_bundle(session: Session, iso3s: list[str], days: int = 7) -> Evide
         "monitored_crises": [{"uid": c.uid, "title": sanitize(c.title), "priority": c.current_priority,
                               "level": c.priority_level, "direction": c.direction} for c in crises],
         "historical_context": _ucdp_history(session, iso3s) if "ucdp_ged" in allowed else {},
+        "experimental_model_estimates": _model_estimates(session, iso3s),
     }
     return EvidenceBundle(scope=("country:" if len(iso3s) == 1 else "multi:") + ",".join(iso3s), items=items, context=ctx)
 

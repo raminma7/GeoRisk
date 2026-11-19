@@ -13,7 +13,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 
-from app.api.v1 import analysis, countries, crises, datasets, economy, monitoring, news, settings as settings_api
+from app.api.v1 import analysis, countries, crises, datasets, economy, monitoring, news, predictions
+from app.api.v1 import settings as settings_api
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.logging import configure_logging, get_logger
@@ -35,7 +36,7 @@ DESCRIPTION = """
 app = FastAPI(title="GeoRisk API", version="0.1.0", description=DESCRIPTION,
               openapi_tags=[{"name": "Global Monitoring"}, {"name": "Countries"}, {"name": "Crises"},
                             {"name": "News and Events"}, {"name": "AI Analysis"}, {"name": "Datasets & Models"},
-                            {"name": "Economy (planned)"}, {"name": "Settings"}, {"name": "Health"}])
+                            {"name": "Early warning (experimental ML)"}, {"name": "Economy (planned)"}, {"name": "Settings"}, {"name": "Health"}])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
@@ -60,7 +61,7 @@ async def request_logging(request: Request, call_next):
 
 v1 = APIRouter(prefix="/api/v1")
 for r in (monitoring.router, countries.router, crises.router, news.router, analysis.router, datasets.router,
-          economy.router, settings_api.router):
+          predictions.router, economy.router, settings_api.router):
     v1.include_router(r)
 app.include_router(v1)
 

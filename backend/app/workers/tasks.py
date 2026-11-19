@@ -91,3 +91,22 @@ def heartbeat() -> dict:
     payload = {"host": socket.gethostname(), "ts": time.time()}
     r.hset("georisk:workers", payload["host"], payload["ts"])
     return payload
+
+
+@celery_app.task(**RETRY)
+@single_instance("ml_monthly_early_warning", ttl_seconds=10800)
+def ml_monthly_early_warning() -> dict:
+    """Monthly: newest UCDP Candidate data -> current-year news archive -> early-warning predictions."""
+    from datetime import date
+
+    from app.ingestion.connectors.ucdp import UcdpGedConnector
+    from app.ml.news_history import backfill
+    from app.ml.predictions import run_predictions
+
+    out: dict = {}
+    with session_scope() as s:
+        out["ucdp_candidate"] = UcdpGedConnector(s).import_latest_candidate()
+    out["news"] = backfill(date.today().year, date.today().year, workers=2)
+    with session_scope() as s:
+        out["predictions"] = run_predictions(s)
+    return out

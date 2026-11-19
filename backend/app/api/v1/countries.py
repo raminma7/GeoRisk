@@ -117,6 +117,12 @@ def daily_series(s: Session, iso3s: list[str], days: int = 90) -> dict[str, list
     return out
 
 
+def _ml_risk(s: Session, iso3: str) -> dict | None:
+    from app.api.v1.predictions import country_risk
+
+    return country_risk(s, iso3)
+
+
 @router.get("/countries/{code}", summary="Country intelligence overview")
 def country_detail(code: str, s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     c = get_country(s, code)
@@ -130,6 +136,7 @@ def country_detail(code: str, s: Session = Depends(get_db), _: Principal = Depen
         "crises": _country_crises(s, c.iso3),
         "relationships": _relationships(s, c.id),
         "timeline": daily_series(s, [c.iso3])[c.iso3],
+        "ml_risk": _ml_risk(s, c.iso3),
         "modules": {"geopolitics": True, "economy": {"status": "planned", "enabled": False}},
     }
 

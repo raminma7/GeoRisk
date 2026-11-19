@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     export_dir: str = "/data/exports"
     model_dir: str = "/data/models"
 
+    # --- separate model service (experimental early-warning model) --------
+    model_service_url: str = "http://localhost:8100"
+    predictions_day_of_month: int = 22  # after UCDP Candidate monthly releases (~20th)
+
     # --- notifications ----------------------------------------------------
     alert_webhook_url: str | None = None
 

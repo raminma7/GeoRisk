@@ -71,6 +71,24 @@ GROUPS: dict[str, list[str]] = {
 
 
 # ------------------------------------------------------------------ helpers
+def load_adjacency_isonum() -> dict[str, list[str]]:
+    """Land borders by ISO numeric code, derived from Natural Earth 1:50m polygons (topojson neighbours)."""
+    from importlib import resources
+
+    with resources.files("app.registry").joinpath("data/adjacency_isonum.json").open() as f:
+        return json.load(f)
+
+
+def neighbours_iso3(session: Session) -> dict[str, list[str]]:
+    num_to_iso, _ = _iso_maps(session)
+    out: dict[str, list[str]] = {}
+    for k, vs in load_adjacency_isonum().items():
+        a = num_to_iso.get(int(k))
+        if a:
+            out[a] = sorted({num_to_iso[int(v)] for v in vs if int(v) in num_to_iso and num_to_iso[int(v)] != a})
+    return out
+
+
 def _iso_maps(session: Session) -> tuple[dict[int, str], dict[str, str]]:
     num = {n: i for i, n in session.execute(select(Country.iso3, Country.iso_numeric)).all() if n}
     gw = dict(session.execute(text(
@@ -141,7 +159,7 @@ def add_dynamics(df: pd.DataFrame) -> pd.DataFrame:
 # ------------------------------------------------------------ feature blocks
 def neighbour_features(session: Session, cm: pd.DataFrame) -> pd.DataFrame:
     num_to_iso, _ = _iso_maps(session)
-    adj_raw = json.loads((FACTOR_DIR / "adjacency_isonum.json").read_text())
+    adj_raw = load_adjacency_isonum()
     adj: dict[str, list[str]] = {}
     for k, vs in adj_raw.items():
         a = num_to_iso.get(int(k))
@@ -283,10 +301,50 @@ def news_features(session: Session, frame: pd.DataFrame) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------- dataset
-def build_enriched(session: Session, include_news: bool = True) -> pd.DataFrame:
-    dv = latest_version(session)
-    cm = universe(session, ucdp_country_months(session, dv.id))
-    base = build_frame(cm, 1)
+def onset_labels(cm: pd.DataFrame) -> pd.DataFrame:
+    """Clean "new war" labels (``onset-major-v1``).
+
+    * ``onset_risk_major`` — no UCDP state-based deaths in the previous 24 months (t-24..t-1)
+    * ``onset_major``      — for those rows: >= 25 deaths (best estimate) in months t..t+2; NaN when the window
+                             is not yet fully observed (e.g. forecast rows)
+    * ``minor_incident``   — fighting in t..t+2 but < 25 deaths (kept for analysis, not a "new war")
+    """
+    out = []
+    for iso, g in cm.sort_values("month").groupby("iso3"):
+        g = g.reset_index(drop=True)
+        prev24 = g["sb_deaths"].shift(1).rolling(24, min_periods=24).sum()
+        nxt = lambda col: g[col][::-1].rolling(3, min_periods=3).sum()[::-1]  # noqa: E731 - t..t+2
+        d3, e3 = nxt("sb_deaths"), nxt("sb_events")
+        risk = prev24 == 0
+        out.append(pd.DataFrame({
+            "iso3": iso, "month": g["month"], "onset_risk_major": risk.astype(int),
+            "deaths_next_3m": d3,
+            "onset_major": np.where(risk & d3.notna(), (d3 >= 25).astype(float), np.nan),
+            "minor_incident": np.where(risk & d3.notna(), ((e3 > 0) & (d3 < 25)).astype(float), np.nan),
+        }))
+    return pd.concat(out, ignore_index=True)
+
+
+def ucdp_history(session: Session) -> tuple[pd.DataFrame, dict]:
+    """Official GED + newer Candidate months, expanded to every country; returns (frame, provenance)."""
+    from app.ingestion.connectors.ucdp import latest_candidate
+
+    dv, cand = latest_version(session), latest_candidate(session)
+    cm = universe(session, ucdp_country_months(session, dv.id, cand.id if cand else None))
+    prov = {"ucdp_official": dv.version, "ucdp_candidate": cand.version if cand else None,
+            "data_through": cm["month"].max().strftime("%Y-%m")}
+    return cm, prov
+
+
+def build_enriched(session: Session, include_news: bool = True, forecast: bool = False) -> pd.DataFrame:
+    """Enriched country-month table. ``forecast=True`` appends one row per country for the month after the
+    last observed UCDP month (features only; labels unknown)."""
+    cm, prov = ucdp_history(session)
+    if forecast:
+        nxt = cm["month"].max() + pd.DateOffset(months=1)
+        extra = pd.DataFrame({"iso3": sorted(cm["iso3"].unique()), "month": nxt})
+        cm = pd.concat([cm, extra], ignore_index=True)  # count columns NaN = not yet observed
+    base = build_frame(cm, 1, keep_unlabeled=forecast)
     out = base.merge(neighbour_features(session, cm), on=["iso3", "month"], how="left")
     out = out.merge(politics_features(session, out), on=["iso3", "month"], how="left")
     out = out.merge(economy_features(out), on=["iso3", "month"], how="left")
@@ -296,7 +354,9 @@ def build_enriched(session: Session, include_news: bool = True) -> pd.DataFrame:
     out = add_dynamics(out)
     GROUPS["dynamics"] = _dynamics_columns(set(out.columns))
     out["is_onset_risk_row"] = (out["sb_events_l12"] == 0).astype(int)  # no fighting in previous 12 months
+    out = out.merge(onset_labels(cm), on=["iso3", "month"], how="left")
     assert len(out) == len(base), "enrichment must not add or drop rows"
+    out.attrs["provenance"] = prov
     return out
 
 
@@ -311,7 +371,12 @@ def _boot_ci(y: np.ndarray, p: np.ndarray, fn, n: int = 300) -> tuple[float, flo
     return (float(np.percentile(vals, 2.5)), float(np.percentile(vals, 97.5))) if vals else (np.nan, np.nan)
 
 
-def evaluate(df: pd.DataFrame, features: list[str], test_years: list[int]) -> dict:
+def evaluate(df: pd.DataFrame, features: list[str], test_years: list[int], target: str = TARGET,
+             risk_col: str = "is_onset_risk_row", make_model=None) -> dict:
+    """Walk-forward evaluation. Ranking metrics (ROC/PR-AUC, top-20) use the model's raw scores, which a
+    calibrator cannot flatten; Brier/log-loss use calibrated probabilities. The isotonic calibrator is fitted
+    on the last 3 training years (rare events need more than one year of positives); if those years hold
+    fewer than 3 positives, raw scores are used as probabilities for that fold."""
     from sklearn.isotonic import IsotonicRegression
     from sklearn.metrics import average_precision_score, roc_auc_score
 
@@ -319,31 +384,37 @@ def evaluate(df: pd.DataFrame, features: list[str], test_years: list[int]) -> di
     for year in test_years:
         train = df[df["month"].dt.year < year]
         test = df[df["month"].dt.year == year]
-        fit, calib = train[train["month"].dt.year < year - 1], train[train["month"].dt.year == year - 1]
-        pos = fit[TARGET].mean()
-        model = _lgbm((1 - pos) / max(pos, 1e-6))
-        model.fit(fit[features], fit[TARGET].astype(int))
-        iso = IsotonicRegression(out_of_bounds="clip", y_min=0, y_max=1)
-        iso.fit(model.predict_proba(calib[features])[:, 1], calib[TARGET].astype(int))
-        p = iso.predict(model.predict_proba(test[features])[:, 1])
-        preds.append(test[["iso3", "month", TARGET, "is_onset_risk_row"]].assign(p=p, year=year))
-    allp = pd.concat(preds)
+        fit, calib = train[train["month"].dt.year < year - 3], train[train["month"].dt.year >= year - 3]
+        pos = fit[target].mean()
+        model = make_model() if make_model else _lgbm((1 - pos) / max(pos, 1e-6))
+        model.fit(fit[features], fit[target].astype(int))
+        raw = model.predict_proba(test[features])[:, 1]
+        if calib[target].sum() >= 3:
+            iso = IsotonicRegression(out_of_bounds="clip", y_min=0, y_max=1)
+            iso.fit(model.predict_proba(calib[features])[:, 1], calib[target].astype(int))
+            p = iso.predict(raw)
+        else:
+            p = raw
+        preds.append(test[["iso3", "month", target, risk_col]].assign(p=p, raw=raw, year=year))
+    allp = pd.concat(preds).rename(columns={target: TARGET, risk_col: "is_onset_risk_row"})
     res = {}
     for name, sub in (("all", allp), ("onset", allp[allp.is_onset_risk_row == 1]), ("ongoing", allp[allp.is_onset_risk_row == 0])):
         if sub.empty:
             continue
-        y, p = sub[TARGET].astype(int).to_numpy(), sub["p"].to_numpy()
+        y, p, r = sub[TARGET].astype(int).to_numpy(), sub["p"].to_numpy(), sub["raw"].to_numpy()
         m = _metrics(y, p)
         m.pop("calibration", None)
         if 0 < y.sum() < len(y):
-            m["pr_auc_ci95"] = _boot_ci(y, p, average_precision_score)
-            m["roc_auc_ci95"] = _boot_ci(y, p, roc_auc_score)
+            m["roc_auc"], m["pr_auc"] = float(roc_auc_score(y, r)), float(average_precision_score(y, r))
+            m["pr_auc_ci95"] = _boot_ci(y, r, average_precision_score)
+            m["roc_auc_ci95"] = _boot_ci(y, r, roc_auc_score)
         res[name] = m
-    # top-20 hit rate for onsets: of the 20 highest-risk onset-risk countries each month, how many started fighting
+    # top-20 per month among onset-risk countries, ranked by raw score
     on = allp[allp.is_onset_risk_row == 1]
-    top = on.sort_values("p", ascending=False).groupby("month").head(20)
+    top = on.sort_values("raw", ascending=False).groupby("month").head(20)
     res["onset_top20_monthly"] = {"flagged": int(len(top)), "hits": int(top[TARGET].sum()),
-                                  "share_of_all_onsets_caught": float(top[TARGET].sum() / max(on[TARGET].sum(), 1))}
+                                  "share_of_all_onsets_caught": float(top[TARGET].sum() / max(on[TARGET].sum(), 1)),
+                                  "precision": float(top[TARGET].mean()) if len(top) else None}
     return res, allp
 
 

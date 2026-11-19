@@ -34,6 +34,8 @@ celery_app.conf.update(
                                  "schedule": crontab(hour=settings.feature_snapshot_hour_utc, minute=7)},
         "ucdp-release-check": {"task": "app.workers.tasks.ucdp_check_release",
                                "schedule": crontab(day_of_week="mon", hour=3, minute=23)},
+        "ml-monthly-early-warning": {"task": "app.workers.tasks.ml_monthly_early_warning",
+                                     "schedule": crontab(day_of_month=settings.predictions_day_of_month, hour=4, minute=13)},
         "worker-heartbeat": {"task": "app.workers.tasks.heartbeat", "schedule": 60},
     },
 )

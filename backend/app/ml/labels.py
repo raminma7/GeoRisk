@@ -31,8 +31,12 @@ from app.ml.models import OutcomeLabel
 LABEL_VERSION = "ucdp-v1"
 
 
-def ucdp_country_months(session: Session, dataset_version_id: int) -> pd.DataFrame:
-    """Monthly UCDP aggregates per country (all months between first and last record, zeros filled)."""
+def ucdp_country_months(session: Session, dataset_version_id: int, candidate_version_id: int | None = None) -> pd.DataFrame:
+    """Monthly UCDP aggregates per country (all months between first and last record, zeros filled).
+
+    With ``candidate_version_id``, preliminary Candidate events dated *after* the official release's last
+    event are appended, extending coverage to the latest published month.
+    """
     rows = session.execute(text(
         "SELECT c.iso3, date_trunc('month', u.date_start)::date AS month, "
         " count(*) FILTER (WHERE u.type_of_violence=1) AS sb_events, "
@@ -42,7 +46,9 @@ def ucdp_country_months(session: Session, dataset_version_id: int) -> pd.DataFra
         " count(*) FILTER (WHERE u.type_of_violence=3) AS os_events, "
         " coalesce(sum(u.deaths_best),0) AS all_deaths "
         "FROM ucdp_events u JOIN countries c ON c.id = u.country_id WHERE u.dataset_version_id = :dv "
-        "GROUP BY 1, 2"), {"dv": dataset_version_id}).all()
+        " OR (u.dataset_version_id = :cand AND u.date_start > "
+        "     (SELECT max(date_start) FROM ucdp_events WHERE dataset_version_id = :dv)) "
+        "GROUP BY 1, 2"), {"dv": dataset_version_id, "cand": candidate_version_id or -1}).all()
     df = pd.DataFrame(rows, columns=["iso3", "month", "sb_events", "sb_deaths", "interstate_events", "ns_events",
                                      "os_events", "all_deaths"])
     if df.empty:
