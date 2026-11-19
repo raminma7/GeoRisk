@@ -27,6 +27,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/models"))
+# Packages shipped with the service (used when MODEL_DIR has none or older versions of a model).
+BUNDLED_DIR = Path(os.environ.get("BUNDLED_MODEL_DIR", str(Path(__file__).resolve().parents[1] / "models")))
 
 
 @dataclass
@@ -64,23 +66,33 @@ def _num(v) -> float:
 
 
 class Registry:
-    def __init__(self, root: Path):
-        self.root = root
+    """Serves the newest version of each model found under any of ``roots`` (e.g. a shared volume written by
+    retraining, plus the packages bundled with the service)."""
+
+    def __init__(self, *roots: Path):
+        self.roots = [r for r in roots if r]
         self.models: dict[str, LoadedModel] = {}
         self.lock = threading.Lock()
 
+    def _candidates(self) -> dict[str, list[Path]]:
+        out: dict[str, list[Path]] = {}
+        for root in self.roots:
+            if not root.exists():
+                continue
+            for model_dir in (p for p in root.iterdir() if p.is_dir()):
+                for v in model_dir.iterdir():
+                    if (v / "model.txt").exists() and (v / "metadata.json").exists():
+                        out.setdefault(model_dir.name, []).append(v)
+        return out
+
     def load(self) -> dict[str, str]:
         found: dict[str, LoadedModel] = {}
-        if self.root.exists():
-            for model_dir in sorted(p for p in self.root.iterdir() if p.is_dir()):
-                versions = sorted(v for v in model_dir.iterdir() if (v / "model.txt").exists() and (v / "metadata.json").exists())
-                if not versions:
-                    continue
-                v = versions[-1]
-                meta = json.loads((v / "metadata.json").read_text())
-                cal = json.loads((v / "calibrator.json").read_text()) if (v / "calibrator.json").exists() else {}
-                found[model_dir.name] = LoadedModel(model_dir.name, v.name, lgb.Booster(model_file=str(v / "model.txt")),
-                                                    list(meta["features"]), cal, meta)
+        for name, versions in sorted(self._candidates().items()):
+            v = sorted(versions, key=lambda p: p.name)[-1]  # newest version across all roots
+            meta = json.loads((v / "metadata.json").read_text())
+            cal = json.loads((v / "calibrator.json").read_text()) if (v / "calibrator.json").exists() else {}
+            found[name] = LoadedModel(name, v.name, lgb.Booster(model_file=str(v / "model.txt")),
+                                      list(meta["features"]), cal, meta)
         with self.lock:
             self.models = found
         return {k: m.version for k, m in found.items()}
@@ -92,7 +104,7 @@ class Registry:
         return m
 
 
-registry = Registry(MODEL_DIR)
+registry = Registry(MODEL_DIR, BUNDLED_DIR)
 app = FastAPI(title="GeoRisk Model Service", version="0.1.0",
               description="Serves versioned GeoRisk ML models. Predictions are experimental research estimates.")
 

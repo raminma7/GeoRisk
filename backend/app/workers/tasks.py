@@ -110,3 +110,23 @@ def ml_monthly_early_warning() -> dict:
     with session_scope() as s:
         out["predictions"] = run_predictions(s)
     return out
+
+
+@celery_app.task
+@single_instance("ml_ensure_early_warning", ttl_seconds=4 * 3600)
+def ml_ensure_early_warning() -> dict:
+    """Runs the first-time early-warning setup when no predictions exist yet (cheap no-op otherwise)."""
+    from app.ml.predictions import bootstrap_early_warning, needs_bootstrap
+
+    with session_scope() as s:
+        if not needs_bootstrap(s):
+            return {"status": "not_needed"}
+    return bootstrap_early_warning()
+
+
+from celery.signals import worker_ready  # noqa: E402
+
+
+@worker_ready.connect
+def _kick_off_early_warning_setup(**_kwargs) -> None:
+    ml_ensure_early_warning.apply_async(countdown=30, queue="ml")

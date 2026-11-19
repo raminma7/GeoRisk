@@ -21,14 +21,68 @@ type WatchList = {
     explainer: { question: string; how: string; levels: Record<string, string>; caveat: string };
   };
   items: Prediction[]; ongoing_conflict: { iso3: string; name: string }[]; total_predicted: number; message?: string;
+  setup?: null | { state: "running" | "failed" | "done"; step?: string | null; step_label?: string | null; error?: string | null;
+    progress?: null | { done: number; total: number | null }; updated_at?: string };
+  setup_steps?: { id: string; label: string }[];
 };
+
+function SetupCard({ data }: { data: WatchList }) {
+  const st = data.setup;
+  const steps = data.setup_steps || [];
+  const current = steps.findIndex((s) => s.id === st?.step);
+  const pct = st?.progress?.total ? Math.round((st.progress.done / st.progress.total) * 100) : null;
+  return (
+    <section className="mx-auto max-w-2xl rounded-2xl border border-line bg-surface p-6 md:p-8">
+      <div className="mb-3 flex items-center gap-2"><ExperimentalBadge /></div>
+      <h1 className="text-2xl font-semibold tracking-tight">
+        {st?.state === "failed" ? "Early-warning setup needs attention" : "Setting up the early-warning model…"}
+      </h1>
+      <p className="mt-2 text-ink2">
+        On a new installation GeoRisk first collects the data the model needs. This runs automatically in the
+        background and usually takes 15–30 minutes. This page updates by itself.
+      </p>
+      <ol className="mt-6 space-y-3">
+        {steps.map((s, i) => {
+          const done = st?.state === "done" || (current >= 0 && i < current);
+          const active = st?.state === "running" && i === current;
+          const failed = st?.state === "failed" && i === current;
+          return (
+            <li key={s.id} className="flex items-start gap-3">
+              <span className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold ${
+                failed ? "bg-crit text-white" : done ? "bg-good text-white" : active ? "bg-accent text-white" : "bg-line text-muted"}`}>
+                {failed ? "!" : done ? "✓" : i + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className={active ? "font-medium" : done ? "text-ink2" : "text-muted"}>{s.label}</div>
+                {active && pct !== null && (
+                  <div className="mt-1.5">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-line/60"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${pct}%` }} /></div>
+                    <div className="mt-1 text-xs text-muted">{st?.progress?.done} of {st?.progress?.total} news archive files</div>
+                  </div>
+                )}
+                {active && pct === null && <div className="mt-1 h-1.5 w-1/3 animate-pulse rounded-full bg-accent/40" />}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      {st?.state === "failed" && <div className="mt-5 rounded-lg border border-crit/40 bg-crit/10 p-3 text-sm text-crit">{st.error}</div>}
+      {!st && <p className="mt-5 text-sm text-muted">Waiting for the background worker to start the setup…</p>}
+      <details className="mt-6 text-sm">
+        <summary className="cursor-pointer text-muted">Run it manually</summary>
+        <pre className="mt-2 overflow-x-auto rounded-lg bg-raised p-3 text-xs ring-1 ring-line">docker compose exec api python -m app.cli setup-early-warning</pre>
+      </details>
+    </section>
+  );
+}
 
 export default function EarlyWarningPage() {
   const router = useRouter();
   const [level, setLevel] = useState<"" | Level>("");
   const [showAll, setShowAll] = useState(false);
   const [region, setRegion] = useState("");
-  const { data, error, isLoading, mutate } = useApi<WatchList>(`/api/v1/predictions${qs({ limit: 300, region })}`);
+  const { data, error, isLoading, mutate } = useApi<WatchList>(`/api/v1/predictions${qs({ limit: 300, region })}`,
+    { refreshInterval: (d?: WatchList) => (d && !d.meta ? 10_000 : 0) });
   const regions = useApi<{ items: { code: string; name: string }[] }>("/api/v1/regions?kind=un_subregion");
   const countries = useApi<{ items: { iso3: string; iso_numeric: number | null }[] }>("/api/v1/countries?limit=500");
 
@@ -56,7 +110,7 @@ export default function EarlyWarningPage() {
 
   if (error) return <ErrorBox error={error} retry={mutate} />;
   if (isLoading || !data) return <Loading what="early-warning watch list" />;
-  if (!data.meta) return <Empty>{data.message || "No predictions yet."}</Empty>;
+  if (!data.meta) return <SetupCard data={data} />;
 
   const m = data.meta;
   const items = data.items.filter((p) => !level || p.level === level);

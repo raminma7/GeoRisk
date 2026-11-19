@@ -41,7 +41,20 @@ from app.ml.models import ModelEvaluation, ModelVersion, TrainingDataset
 from app.registry.models import Country
 
 log = get_logger(__name__)
-FACTOR_DIR = Path("/var/tmp/georisk/factors")
+FACTOR_DIR: Path | None = None  # override (tests); default is settings.factor_dir
+
+
+def _fd() -> Path:
+    return FACTOR_DIR or Path(get_settings().factor_dir)
+
+
+def _read_csv(name: str) -> pd.DataFrame | None:
+    """A missing factor file leaves its columns empty (NaN) instead of failing the whole dataset."""
+    path = _fd() / name
+    if not path.exists():
+        log.warning("factor_file_missing", file=str(path), hint="python -m app.cli download-factors")
+        return None
+    return pd.read_csv(path)
 TARGET = "state_based_event"
 WDI = {
     "NY.GDP.PCAP.KD": "wdi_gdp_per_capita_const_usd",
@@ -104,8 +117,8 @@ def _release_year(months: pd.Series, release_month: int) -> pd.Series:
 
 def universe(session: Session, cm: pd.DataFrame) -> pd.DataFrame:
     """Expand UCDP country-months to every V-Dem country (zeros where UCDP recorded nothing)."""
-    vdem = pd.read_csv(FACTOR_DIR / "owid_political-regime.csv")
-    isos = set(vdem["code"].dropna()) | set(cm["iso3"])
+    vdem = _read_csv("owid_political-regime.csv")
+    isos = (set(vdem["code"].dropna()) if vdem is not None else set()) | set(cm["iso3"])
     known = set(session.scalars(select(Country.iso3).where(Country.is_historical.is_(False))))
     isos = sorted(i for i in isos if isinstance(i, str) and len(i) == 3 and i in known)
     months = pd.date_range(cm["month"].min(), cm["month"].max(), freq="MS")
@@ -198,33 +211,26 @@ def neighbour_features(session: Session, cm: pd.DataFrame) -> pd.DataFrame:
 def politics_features(session: Session, frame: pd.DataFrame) -> pd.DataFrame:
     keys = frame[["iso3", "month"]].copy()
     keys["vy"] = _release_year(keys["month"], 4)
-    ed = pd.read_csv(FACTOR_DIR / "owid_electoral-democracy-index.csv").rename(
-        columns={"code": "iso3", "year": "vy", "electdem_vdem__estimate_best": "vdem_electoral_democracy"})
-    ld = pd.read_csv(FACTOR_DIR / "owid_liberal-democracy-index.csv").rename(
-        columns={"code": "iso3", "year": "vy", "libdem_vdem__estimate_best": "vdem_liberal_democracy"})
-    rg = pd.read_csv(FACTOR_DIR / "owid_political-regime.csv").rename(columns={"code": "iso3", "year": "vy"})
-    rg["vdem_regime_type"] = rg["regime_row_owid"].map(REGIME)
-    v = ed[["iso3", "vy", "vdem_electoral_democracy"]].merge(ld[["iso3", "vy", "vdem_liberal_democracy"]], on=["iso3", "vy"], how="outer") \
-        .merge(rg[["iso3", "vy", "vdem_regime_type"]], on=["iso3", "vy"], how="outer").sort_values(["iso3", "vy"])
-    v["vdem_electoral_democracy_change"] = v.groupby("iso3")["vdem_electoral_democracy"].diff()
-    out = keys.merge(v, on=["iso3", "vy"], how="left")
+    ed_raw, ld_raw, rg_raw = (_read_csv("owid_electoral-democracy-index.csv"), _read_csv("owid_liberal-democracy-index.csv"),
+                              _read_csv("owid_political-regime.csv"))
+    vcols = ["vdem_electoral_democracy", "vdem_liberal_democracy", "vdem_regime_type", "vdem_electoral_democracy_change"]
+    if ed_raw is None or ld_raw is None or rg_raw is None:
+        out = keys.assign(**{c: np.nan for c in vcols})
+    else:
+        ed = ed_raw.rename(columns={"code": "iso3", "year": "vy", "electdem_vdem__estimate_best": "vdem_electoral_democracy"})
+        ld = ld_raw.rename(columns={"code": "iso3", "year": "vy", "libdem_vdem__estimate_best": "vdem_liberal_democracy"})
+        rg = rg_raw.rename(columns={"code": "iso3", "year": "vy"})
+        rg["vdem_regime_type"] = rg["regime_row_owid"].map(REGIME)
+        v = ed[["iso3", "vy", "vdem_electoral_democracy"]].merge(ld[["iso3", "vy", "vdem_liberal_democracy"]], on=["iso3", "vy"], how="outer") \
+            .merge(rg[["iso3", "vy", "vdem_regime_type"]], on=["iso3", "vy"], how="outer").sort_values(["iso3", "vy"])
+        v["vdem_electoral_democracy_change"] = v.groupby("iso3")["vdem_electoral_democracy"].diff()
+        out = keys.merge(v, on=["iso3", "vy"], how="left")
     # EPR: groups active in year Y-1
     _, gw_to_iso = _iso_maps(session)
-    epr = pd.read_csv(FACTOR_DIR / "epr.csv")
-    epr["iso3"] = epr["gwid"].astype(str).map(gw_to_iso)
-    years = range(int(epr["from"].min()), int(epr["to"].max()) + 1)
-    ex = epr[epr["status"].isin(["POWERLESS", "DISCRIMINATED"])]
-    rows = []
-    for y in years:
-        act = epr[(epr["from"] <= y) & (epr["to"] >= y)]
-        exa = ex[(ex["from"] <= y) & (ex["to"] >= y)]
-        a = act.groupby("iso3").size().rename("epr_relevant_groups")
-        e = exa.groupby("iso3").agg(epr_excluded_pop_share=("size", "sum"), epr_excluded_groups=("size", "size"))
-        df = pd.concat([a, e], axis=1).reset_index()
-        df["ey"] = y
-        rows.append(df)
-    eprm = pd.concat(rows)
-    eprm[["epr_excluded_pop_share", "epr_excluded_groups"]] = eprm[["epr_excluded_pop_share", "epr_excluded_groups"]].fillna(0)
+    epr = _read_csv("epr.csv")
+    if epr is None:
+        out = out.assign(epr_excluded_pop_share=np.nan, epr_excluded_groups=np.nan, epr_relevant_groups=np.nan)
+        return out[["iso3", "month", *GROUPS["politics"]]]
     out["ey"] = out["month"].dt.year - 1
     out = out.merge(eprm, on=["iso3", "ey"], how="left")
     return out[["iso3", "month", *GROUPS["politics"]]]
@@ -235,12 +241,14 @@ def economy_features(frame: pd.DataFrame) -> pd.DataFrame:
     keys["wy"] = _release_year(keys["month"], 7)
     vals = []
     for code, name in WDI.items():
-        data = json.loads((FACTOR_DIR / f"wdi_{code}.json").read_text())[1] or []
+        path = _fd() / f"wdi_{code}.json"
+        data = (json.loads(path.read_text())[1] or []) if path.exists() else []
         vals.append(pd.DataFrame([{"iso3": d["countryiso3code"], "wy": int(d["date"]), name: d["value"]}
-                                  for d in data if d["countryiso3code"]]))
+                                  for d in data if d["countryiso3code"]], columns=["iso3", "wy", name]))
     w = vals[0]
     for v in vals[1:]:
         w = w.merge(v, on=["iso3", "wy"], how="outer")
+    w[list(WDI.values())] = w[list(WDI.values())].apply(pd.to_numeric, errors="coerce")
     w["wdi_log_gdp_per_capita"] = np.log(w["wdi_gdp_per_capita_const_usd"])
     w["wdi_log_population"] = np.log(w["wdi_population"])
     out = keys.merge(w, on=["iso3", "wy"], how="left")
@@ -249,13 +257,17 @@ def economy_features(frame: pd.DataFrame) -> pd.DataFrame:
 
 def price_features(frame: pd.DataFrame) -> pd.DataFrame:
     def fred(sid: str, name: str) -> pd.DataFrame:
-        df = pd.read_csv(FACTOR_DIR / f"fred_{sid}.csv")
+        df = _read_csv(f"fred_{sid}.csv")
+        if df is None:
+            return pd.DataFrame({name: pd.Series(dtype=float)}, index=pd.DatetimeIndex([], name="month"))
         df.columns = ["month", name]
         df["month"] = pd.to_datetime(df["month"])
         df[name] = pd.to_numeric(df[name], errors="coerce")
         return df.set_index("month")
 
     p = pd.concat([fred("MCOILBRENTEU", "brent"), fred("PFOODINDEXM", "food"), fred("PWHEAMTUSDM", "wheat")], axis=1)
+    if p.dropna(how="all").empty:
+        return frame[["iso3", "month"]].assign(**{c: np.nan for c in GROUPS["prices"]})
     p = p.reindex(pd.date_range(p.index.min(), frame["month"].max(), freq="MS"))
     f = pd.DataFrame(index=p.index)
     f["brent_usd"] = p["brent"].shift(1)  # month t-1

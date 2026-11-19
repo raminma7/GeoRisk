@@ -6,7 +6,7 @@ COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --upgrade pip && pip install ".[dev]"
 COPY . .
-RUN useradd -m georisk && mkdir -p /data/exports /data/models && chown -R georisk /data /app
+RUN useradd -m georisk && mkdir -p /data/exports /data/models /data/factors && chown -R georisk /data /app
 USER georisk
 EXPOSE 8000
 ENTRYPOINT []

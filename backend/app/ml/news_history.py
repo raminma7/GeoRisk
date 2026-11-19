@@ -154,7 +154,9 @@ def _store(file_key: str, df: pd.DataFrame) -> int:
     return len(rows)
 
 
-def backfill(start_year: int = 1988, end_year: int = 2025, workers: int = 4, max_files: int | None = None) -> dict:
+def backfill(start_year: int = 1988, end_year: int = 2025, workers: int = 4, max_files: int | None = None,
+             on_progress=None) -> dict:
+    """``on_progress(done, total)`` is called after each file (used for setup status in the UI)."""
     files = list_files(start_year, end_year)
     with SessionLocal() as s:
         src = get_source(s, SOURCE_KEY)
@@ -166,25 +168,32 @@ def backfill(start_year: int = 1988, end_year: int = 2025, workers: int = 4, max
     cameo, fips = _maps()
     stats = {"files_total": len(files), "already_done": len(done), "processed": 0, "failed": 0, "rows": 0}
     log.info("news_history_start", todo=len(todo))
-    with ProcessPoolExecutor(max_workers=workers) as ex:
-        futs = [ex.submit(_work, n, d, cameo, fips) for n, d in todo]
-        for f in as_completed(futs):
-            name, df, err = f.result()
-            if err:
-                stats["failed"] += 1
-                with SessionLocal() as s:
-                    src = get_source(s, SOURCE_KEY)
-                    b = s.scalar(select(IngestionBatch).where(IngestionBatch.data_source_id == src.id,
-                                                              IngestionBatch.batch_key == name))
-                    b.status, b.last_error = "failed", err
-                    b.attempts += 1
-                    s.commit()
-                log.warning("news_history_file_failed", file=name, error=err)
-                continue
-            stats["rows"] += _store(name, df)
-            stats["processed"] += 1
-            if stats["processed"] % 50 == 0:
-                log.info("news_history_progress", **stats)
+    import multiprocessing
+
+    # Celery prefork workers are daemonic and may not spawn child processes: process files in-line there.
+    if workers <= 1 or multiprocessing.current_process().daemon:
+        results = (_work(n, d, cameo, fips) for n, d in todo)
+    else:
+        ex = ProcessPoolExecutor(max_workers=workers)
+        results = (f.result() for f in as_completed([ex.submit(_work, n, d, cameo, fips) for n, d in todo]))
+    for name, df, err in results:
+        if err:
+            stats["failed"] += 1
+            with SessionLocal() as s:
+                src = get_source(s, SOURCE_KEY)
+                b = s.scalar(select(IngestionBatch).where(IngestionBatch.data_source_id == src.id,
+                                                          IngestionBatch.batch_key == name))
+                b.status, b.last_error = "failed", err
+                b.attempts += 1
+                s.commit()
+            log.warning("news_history_file_failed", file=name, error=err)
+            continue
+        stats["rows"] += _store(name, df)
+        stats["processed"] += 1
+        if on_progress:
+            on_progress(stats["already_done"] + stats["processed"], stats["files_total"])
+        if stats["processed"] % 50 == 0:
+            log.info("news_history_progress", **stats)
     return stats
 
 

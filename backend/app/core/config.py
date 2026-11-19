@@ -124,6 +124,7 @@ class Settings(BaseSettings):
     feature_snapshot_hour_utc: int = 2
     export_dir: str = "/data/exports"
     model_dir: str = "/data/models"
+    factor_dir: str = "/data/factors"  # external factor files (python -m app.cli download-factors)
 
     # --- separate model service (experimental early-warning model) --------
     model_service_url: str = "http://localhost:8100"

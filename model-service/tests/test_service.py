@@ -50,3 +50,29 @@ def test_explain_missing_and_unknown_fields(client):
     assert p["missing_factors"] == 1 and r["ignored_fields"] == ["zzz"]
     assert {x["factor"] for x in p["contributions"]} <= {"a", "b"}
     assert c.post("/predict", json={"model": "nope", "rows": [{"a": 1}]}).status_code == 404
+
+
+def test_bundled_fallback_and_newer_shared_version_wins(tmp_path):
+    import model_service.main as svc
+
+    def pkg(root, version):
+        rng = np.random.default_rng(1)
+        x = rng.normal(size=(200, 1))
+        b = lgb.train({"objective": "binary", "verbose": -1}, lgb.Dataset(x, (x[:, 0] > 0).astype(int)), num_boost_round=5)
+        d = root / "conflict_onset" / version
+        d.mkdir(parents=True)
+        b.save_model(str(d / "model.txt"))
+        (d / "metadata.json").write_text(json.dumps({"features": ["a"]}))
+
+    shared, bundled = tmp_path / "shared", tmp_path / "bundled"
+    pkg(bundled, "v20260101-bundled")
+    assert svc.Registry(shared, bundled).load() == {"conflict_onset": "v20260101-bundled"}  # empty shared volume
+    pkg(shared, "v20270101-retrained")
+    assert svc.Registry(shared, bundled).load() == {"conflict_onset": "v20270101-retrained"}
+
+
+def test_real_bundled_package_loads():
+    import model_service.main as svc
+
+    loaded = svc.Registry(svc.BUNDLED_DIR).load()
+    assert "conflict_onset" in loaded

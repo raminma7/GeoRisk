@@ -47,4 +47,16 @@ def test_watch_list_country_and_spillover(db):
 
 def test_no_predictions_yet(db):
     r = TestClient(app).get("/api/v1/predictions").json()
-    assert r["items"] == [] and r["meta"] is None
+    assert r["items"] == [] and r["meta"] is None and "setup_steps" in r
+
+
+def test_setup_status_shown_while_bootstrapping(db):
+    from app.ml import predictions as P
+
+    assert P.needs_bootstrap(db) is True
+    P._set_status(state="running", step="news", step_label=P.STEP_LABELS["news"], progress={"done": 50, "total": 700})
+    db.expire_all()
+    assert P.needs_bootstrap(db) is False  # a fresh running setup is not started twice
+    r = TestClient(app).get("/api/v1/predictions").json()
+    assert r["meta"] is None and r["setup"]["step"] == "news" and r["setup"]["progress"]["total"] == 700
+    assert [s["id"] for s in r["setup_steps"]] == P.STEPS

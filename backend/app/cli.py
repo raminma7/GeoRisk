@@ -9,6 +9,8 @@
     python -m app.cli import-ucdp [--version 26.1] [--min-year 2015]
     python -m app.cli snapshots [--date 2026-11-18]
     python -m app.cli backfill-news-history --start 1988 --end 2025   # GDELT 1.0 archive -> country-month news
+    python -m app.cli setup-early-warning                            # first-time setup (also automatic in Docker)
+    python -m app.cli download-factors [--refresh]                   # World Bank, V-Dem, EPR, prices
     python -m app.cli train-onset-model                              # clean labels -> model package
     python -m app.cli predict-onsets                                 # model service -> ml_predictions
     python -m app.cli labels [--horizon 1] [--start 2010-01-01]
@@ -129,6 +131,18 @@ def cmd_predict_onsets(_args) -> dict:
         return run_predictions(s)
 
 
+def cmd_download_factors(args) -> dict:
+    from app.ml.factors import download_factors
+
+    return download_factors(refresh=args.refresh)
+
+
+def cmd_setup_early_warning(args) -> dict:
+    from app.ml.predictions import bootstrap_early_warning
+
+    return bootstrap_early_warning(news_years=args.news_years)
+
+
 def cmd_labels(args) -> dict:
     from app.ml.labels import store_labels
 
@@ -192,6 +206,12 @@ def main() -> None:
     x.add_argument("--variant", default=None)
     x.set_defaults(fn=cmd_train_onset_model)
     sub.add_parser("predict-onsets").set_defaults(fn=cmd_predict_onsets)
+    x = sub.add_parser("download-factors")
+    x.add_argument("--refresh", action="store_true")
+    x.set_defaults(fn=cmd_download_factors)
+    x = sub.add_parser("setup-early-warning")
+    x.add_argument("--news-years", type=int, default=2)
+    x.set_defaults(fn=cmd_setup_early_warning)
     x = sub.add_parser("labels")
     x.add_argument("--horizon", type=int, default=1)
     x.add_argument("--start", default=None)

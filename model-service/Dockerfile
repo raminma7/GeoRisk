@@ -5,6 +5,9 @@ WORKDIR /srv
 COPY pyproject.toml ./
 COPY model_service ./model_service
 RUN pip install .
+# trained packages shipped with the service; a newer version in MODEL_DIR (shared volume) takes precedence
+COPY models /srv/bundled-models
+ENV BUNDLED_MODEL_DIR=/srv/bundled-models
 RUN useradd -m svc
 USER svc
 ENV MODEL_DIR=/models

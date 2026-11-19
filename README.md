@@ -36,13 +36,36 @@ history plus neighbours, politics, economy and news trends; out-of-time ROC-AUC 
 page, the homepage, country pages and crisis pages (spillover). Details:
 [`docs/ml-enrichment-results.md`](docs/ml-enrichment-results.md).
 
+**It sets itself up.** The trained model ships with the model service. On first start the background worker
+imports UCDP history, downloads the country factors (World Bank, V-Dem, EPR, prices) and the last two years of the
+GDELT news archive, then calculates predictions. This takes about 15–30 minutes, and the Early warning page shows
+progress meanwhile. After that it updates monthly. Manual commands:
+
+```bash
+docker compose exec api python -m app.cli setup-early-warning
+```
+
+```bash
+docker compose exec api python -m app.cli download-factors --refresh
+```
+
+To retrain from scratch, you need the full news archive first (1988→, about 1–3 hours, resumable). Then a new model
+version appears in the shared volume and the service prefers it:
+
+```bash
+docker compose exec api python -m app.cli backfill-news-history --start 1988 --end 2026
+```
+
 ```bash
 docker compose exec api python -m app.cli train-onset-model
 ```
 
 ```bash
-docker compose exec api python -m app.cli predict-onsets
+curl -X POST localhost:8100/reload
 ```
+
+Hosts used: data.gdeltproject.org, ucdp.uu.se, api.worldbank.org, ourworldindata.org, icr.ethz.ch,
+fred.stlouisfed.org.
 
 ## Quick start (Docker Compose)
 

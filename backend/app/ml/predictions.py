@@ -187,3 +187,104 @@ def count_by_level(session: Session, version: str, window) -> dict:
 
 def _isnan(x) -> bool:
     return isinstance(x, float) and math.isnan(x)
+
+
+# --------------------------------------------------------------- first-run setup
+STATUS_KEY = "ml_bootstrap_status"
+STEPS = ["ucdp", "factors", "news", "model_service", "predict"]
+STEP_LABELS = {"ucdp": "Importing UCDP conflict history", "factors": "Downloading country factors (World Bank, V-Dem, …)",
+               "news": "Loading recent news archive", "model_service": "Connecting to the model service",
+               "predict": "Calculating predictions"}
+
+
+def _set_status(**fields) -> None:
+    """Persist setup progress immediately (own transaction) so the UI can show it while the job runs."""
+    from app.core.db import session_scope
+    from app.ingestion.models import AppSetting
+
+    with session_scope() as s:
+        row = s.get(AppSetting, STATUS_KEY)
+        if row is None:
+            row = AppSetting(key=STATUS_KEY, value={})
+            s.add(row)
+        row.value = {**(row.value or {}), **fields, "updated_at": utcnow().isoformat()}
+        row.updated_by = "early-warning-setup"
+
+
+def setup_status(session: Session) -> dict | None:
+    from app.ingestion.models import AppSetting
+
+    row = session.get(AppSetting, STATUS_KEY)
+    return row.value if row else None
+
+
+def bootstrap_early_warning(news_years: int = 2, wait_for_service_s: int = 300) -> dict:
+    """Make predictions available on a fresh install, using the model bundled with the model service.
+
+    Only recent news (``news_years``) is needed for current predictions; the full 1988→ archive is only needed
+    to retrain (``python -m app.cli backfill-news-history`` + ``train-onset-model``).
+    """
+    import time
+    from datetime import date
+
+    from app.core.db import session_scope
+    from app.ingestion.connectors.ucdp import UcdpGedConnector, latest_candidate, latest_version
+    from app.ml.factors import download_factors, missing
+    from app.ml.news_history import backfill
+
+    out: dict = {}
+    _set_status(state="running", step="ucdp", step_label=STEP_LABELS["ucdp"], started_at=utcnow().isoformat(), error=None,
+                 progress=None)
+    try:
+        with session_scope() as s:
+            con = UcdpGedConnector(s)
+            out["ucdp"] = "present" if latest_version(s) else con.import_version()
+            if latest_candidate(s) is None:
+                try:
+                    out["ucdp_candidate"] = con.import_latest_candidate()
+                except Exception as exc:  # noqa: BLE001 - preliminary data is optional
+                    out["ucdp_candidate"] = f"skipped: {exc}"[:200]
+
+        _set_status(step="factors", step_label=STEP_LABELS["factors"])
+        out["factors"] = download_factors() if missing() else {"status": "present"}
+
+        _set_status(step="news", step_label=STEP_LABELS["news"], progress={"done": 0, "total": None})
+        y = date.today().year
+        out["news"] = backfill(y - news_years + 1, y, workers=2,
+                               on_progress=lambda d, t: _set_status(progress={"done": d, "total": t}) if d % 25 == 0 else None)
+
+        _set_status(step="model_service", step_label=STEP_LABELS["model_service"], progress=None)
+        deadline = time.monotonic() + wait_for_service_s
+        while True:
+            try:
+                model_info()
+                break
+            except ModelServiceUnavailable:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(10)
+
+        _set_status(step="predict", step_label=STEP_LABELS["predict"])
+        with session_scope() as s:
+            out["predictions"] = run_predictions(s)
+        _set_status(state="done", step=None, step_label=None, finished_at=utcnow().isoformat())
+        return out
+    except Exception as exc:
+        _set_status(state="failed", error=f"{type(exc).__name__}: {exc}"[:500])
+        log.error("early_warning_setup_failed", error=str(exc))
+        raise
+
+
+def needs_bootstrap(session: Session) -> bool:
+    if latest_window(session) is not None:
+        return False
+    st = setup_status(session) or {}
+    if st.get("state") == "running":
+        # treat a run with no progress for 2 hours as dead (e.g. container restart)
+        from datetime import datetime, timedelta
+
+        try:
+            return utcnow() - datetime.fromisoformat(st.get("updated_at")) > timedelta(hours=2)
+        except (TypeError, ValueError):
+            return True
+    return True

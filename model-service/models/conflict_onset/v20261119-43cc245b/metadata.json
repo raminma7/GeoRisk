@@ -1,0 +1,150 @@
+{
+  "name": "conflict_onset",
+  "version": "v20261119-43cc245b",
+  "trained_at": "2026-11-19T15:50:33.237416+00:00",
+  "variant": "G_structural_plus_dynamics",
+  "features": [
+    "sb_events_l1",
+    "sb_events_l3",
+    "sb_events_l6",
+    "sb_events_l12",
+    "sb_deaths_l1",
+    "sb_deaths_l3",
+    "sb_deaths_l12",
+    "ns_events_l3",
+    "os_events_l3",
+    "interstate_l12",
+    "months_since_sb",
+    "sb_active_months_l12",
+    "nb_count",
+    "nb_sb_events_l1",
+    "nb_sb_events_l12",
+    "nb_sb_deaths_l12",
+    "nb_countries_in_conflict_l12",
+    "region_sb_events_l12",
+    "region_countries_in_conflict_l12",
+    "vdem_electoral_democracy",
+    "vdem_liberal_democracy",
+    "vdem_regime_type",
+    "vdem_electoral_democracy_change",
+    "epr_excluded_pop_share",
+    "epr_excluded_groups",
+    "epr_relevant_groups",
+    "wdi_log_gdp_per_capita",
+    "wdi_gdp_growth_pct",
+    "wdi_inflation_pct",
+    "wdi_log_population",
+    "wdi_pop_age_0_14_pct",
+    "wdi_natural_resource_rents_pct_gdp",
+    "wdi_unemployment_pct",
+    "news_violent_share_chg_6m",
+    "news_threat_share_chg_6m",
+    "news_avg_tone_chg_3m",
+    "news_avg_goldstein_chg_3m",
+    "news_coverage_change_3m",
+    "news_violent_share",
+    "nb_sb_events_l1_chg_6m",
+    "wdi_log_gdp_per_capita_chg_12m",
+    "vdem_liberal_democracy_chg_12m",
+    "epr_excluded_pop_share_chg_12m"
+  ],
+  "label": "onset_major",
+  "label_definition": "New conflict: no UCDP state-based deaths in the previous 24 months, then >= 25 deaths (UCDP best estimate) within the next 3 months (t..t+2).",
+  "applies_to": "Countries with no UCDP state-based deaths in the previous 24 months",
+  "prediction_window": "the month after the data ends and the following 2 months (t..t+2)",
+  "training_rows": 55905,
+  "training_onsets": 155,
+  "base_rate": 0.002772560593864592,
+  "algorithm": "lightgbm (depth-2, regularised) + Platt calibration (out-of-time)",
+  "selection_note": "Model type chosen by comparing 3 configurations on the same test years (slightly optimistic estimate).",
+  "data_checksum": "43cc245b411c697d013d4e0af72c583b9857d5d7b466b485146adbca8b97e44b",
+  "provenance": {
+    "ucdp_official": "26.1",
+    "ucdp_candidate": "candidate-v26_01_26_09",
+    "data_through": "2026-09"
+  },
+  "random_seed": 20261119,
+  "test": {
+    "years": [
+      2013,
+      2025
+    ],
+    "n_features": 43,
+    "onsets_tested": 34,
+    "rows_tested": 20197,
+    "roc_auc": 0.8897427145236907,
+    "roc_auc_ci95": [
+      0.8541263747522889,
+      0.927976039396565
+    ],
+    "pr_auc": 0.014873667831643171,
+    "pr_auc_ci95": [
+      0.007823308299167747,
+      0.03375947789199798
+    ],
+    "brier": 0.001724026638282731,
+    "base_rate": 0.0016834183294548695,
+    "top20_share_caught": 0.7058823529411765,
+    "top20_precision": 0.007692307692307693
+  },
+  "all_variants": {
+    "A_history_only": {
+      "n_features": 12,
+      "onsets_tested": 34,
+      "rows_tested": 20197,
+      "roc_auc": 0.7339871225978861,
+      "roc_auc_ci95": [
+        0.6184224619877438,
+        0.8171812508685544
+      ],
+      "pr_auc": 0.007071369749102102,
+      "pr_auc_ci95": [
+        0.00320524800533508,
+        0.018277816513442322
+      ],
+      "brier": 0.0017000870581877542,
+      "base_rate": 0.0016834183294548695,
+      "top20_share_caught": 0.5,
+      "top20_precision": 0.0054487179487179484
+    },
+    "B_structural": {
+      "n_features": 33,
+      "onsets_tested": 34,
+      "rows_tested": 20197,
+      "roc_auc": 0.8870798579809843,
+      "roc_auc_ci95": [
+        0.8606719916775087,
+        0.9149601421763344
+      ],
+      "pr_auc": 0.011730774965959942,
+      "pr_auc_ci95": [
+        0.00621833873840929,
+        0.028925680336943455
+      ],
+      "brier": 0.0017296472954631428,
+      "base_rate": 0.0016834183294548695,
+      "top20_share_caught": 0.6764705882352942,
+      "top20_precision": 0.007371794871794872
+    },
+    "G_structural_plus_dynamics": {
+      "n_features": 43,
+      "onsets_tested": 34,
+      "rows_tested": 20197,
+      "roc_auc": 0.8897427145236907,
+      "roc_auc_ci95": [
+        0.8541263747522889,
+        0.927976039396565
+      ],
+      "pr_auc": 0.014873667831643171,
+      "pr_auc_ci95": [
+        0.007823308299167747,
+        0.03375947789199798
+      ],
+      "brier": 0.001724026638282731,
+      "base_rate": 0.0016834183294548695,
+      "top20_share_caught": 0.7058823529411765,
+      "top20_precision": 0.007692307692307693
+    }
+  },
+  "disclaimer": "Experimental research estimate based on historical patterns. Not a probability of war."
+}

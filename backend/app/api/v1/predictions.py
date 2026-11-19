@@ -64,8 +64,10 @@ def watch_list(limit: int = Query(50, ge=1, le=300), region: str | None = None, 
                s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     meta = _meta(s)
     if meta is None:
-        return {"meta": None, "items": [], "ongoing_conflict": [],
-                "message": "No predictions yet. Run `python -m app.cli predict-onsets` (needs the model service)."}
+        return {"meta": None, "items": [], "ongoing_conflict": [], "setup": P.setup_status(s),
+                "setup_steps": [{"id": k, "label": P.STEP_LABELS[k]} for k in P.STEPS],
+                "message": "The early-warning model is being set up. In Docker this starts automatically; manually: "
+                           "`python -m app.cli setup-early-warning`."}
     lw = P.latest_window(s)
     q = (select(MlPrediction, Country.name, Region.name)
          .join(Country, Country.iso3 == MlPrediction.iso3).outerjoin(Region, Region.id == Country.subregion_id)
