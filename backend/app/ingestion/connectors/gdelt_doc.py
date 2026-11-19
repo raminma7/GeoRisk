@@ -52,6 +52,14 @@ def default_doc_fetcher(params: dict) -> dict:
         return json.loads(text.encode("utf-8").decode("unicode_escape", errors="ignore"))
 
 
+def _is_rate_limited(exc: Exception) -> bool:
+    import httpx
+
+    if isinstance(exc, http.RateLimitedError):
+        return True
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429
+
+
 class GdeltDocConnector:
     def __init__(self, session: Session, fetcher: DocFetcher | None = None):
         self.session = session
@@ -77,6 +85,7 @@ class GdeltDocConnector:
         stats = {"queries": 0, "failed_queries": 0, "fetched": 0, "inserted": 0, "clusters_created": 0}
         with ingestion_run(self.session, self.source.id, "gdelt_doc.run") as run:
             new_ids: list[int] = []
+            consecutive_limited = 0
             for stream, query, topic, country_id in self.queries()[: max_queries or None]:
                 try:
                     fetched, ids = self.run_query(stream, query, topic, country_id, now)
@@ -85,10 +94,19 @@ class GdeltDocConnector:
                     stats["inserted"] += len(ids)
                     new_ids.extend(ids)
                     self.session.commit()
+                    consecutive_limited = 0
                 except Exception as exc:  # noqa: BLE001 - one failing query must not stop discovery
                     self.session.rollback()
                     stats["failed_queries"] += 1
                     log.warning("gdelt_doc_query_failed", stream=stream, error=f"{type(exc).__name__}: {exc}")
+                    # Circuit breaker: GDELT DOC rate limits are per IP. After 2 refusals in a row, stop this
+                    # cycle instead of hammering the API; per-query checkpoints resume next cycle.
+                    if _is_rate_limited(exc):
+                        consecutive_limited += 1
+                        if consecutive_limited >= 2:
+                            stats["stopped_early"] = "rate_limited"
+                            log.warning("gdelt_doc_rate_limited_stop", completed=stats["queries"])
+                            break
             stats["clusters_created"] = cluster_new_articles(self.session, new_ids)
             run = self.session.merge(run)
             run.records_fetched = stats["fetched"]

@@ -137,3 +137,18 @@ def test_doc_failure_is_recorded_not_raised(db):
     assert stats["failed_queries"] == 1
     run = db.scalar(select(IngestionRun).order_by(IngestionRun.id.desc()))
     assert run.status == "failed" and "failed" in (run.error or "")
+
+
+def test_doc_stops_early_when_rate_limited(db):
+    import httpx
+
+    calls = []
+
+    def limited(params):
+        calls.append(params)
+        req = httpx.Request("GET", "https://api.gdeltproject.org/api/v2/doc/doc")
+        raise httpx.HTTPStatusError("429", request=req, response=httpx.Response(429, request=req))
+
+    stats = GdeltDocConnector(db, fetcher=limited).run()
+    assert stats["stopped_early"] == "rate_limited"
+    assert len(calls) == 2  # did not keep hammering the remaining queries
