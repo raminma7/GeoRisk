@@ -12,3 +12,4 @@ frontend/out/
 *.log
 .DS_Store
 frontend/tsconfig.tsbuildinfo
+*.egg-info/
