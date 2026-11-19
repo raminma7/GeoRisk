@@ -8,10 +8,10 @@ the ``app_settings`` table and merged by :mod:`app.core.runtime_settings`.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     log_json: bool = True
     database_url: str = "postgresql+psycopg://georisk:georisk@localhost:5432/georisk"
     redis_url: str = "redis://localhost:6379/0"
-    cors_origins: list[str] = ["http://localhost:3000"]
+    # NoDecode: accept plain comma-separated env values (e.g. CORS_ORIGINS=http://a,http://b); JSON lists also work
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
     # --- security ---------------------------------------------------------
     # Comma separated "role:key" pairs, e.g. "admin:abc123,analyst:def456".
@@ -41,7 +42,7 @@ class Settings(BaseSettings):
     # --- monitoring watchlist / coverage ----------------------------------
     # ISO3 codes. Ingestion is global; the watchlist only drives DOC news queries
     # and extra AI attention.
-    watchlist: list[str] = Field(
+    watchlist: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["UKR", "RUS", "ISR", "PSE", "IRN", "SDN", "CHN", "TWN", "IND", "PAK", "COD", "VEN"]
     )
 
@@ -133,15 +134,25 @@ class Settings(BaseSettings):
 
     @field_validator("watchlist", mode="before")
     @classmethod
-    def _split_csv(cls, v):  # allow WATCHLIST=UKR,RUS in env
-        if isinstance(v, str) and not v.strip().startswith("["):
+    def _split_csv(cls, v):  # allow WATCHLIST=UKR,RUS in env (or a JSON list)
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("["):
+                import json
+
+                return [str(x).upper() for x in json.loads(v)]
             return [x.strip().upper() for x in v.split(",") if x.strip()]
         return v
 
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, v):
-        if isinstance(v, str) and not v.strip().startswith("["):
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("["):
+                import json
+
+                return json.loads(v)
             return [x.strip() for x in v.split(",") if x.strip()]
         return v
 
