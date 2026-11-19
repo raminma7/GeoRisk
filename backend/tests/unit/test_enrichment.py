@@ -59,3 +59,31 @@ def test_dynamics_are_changes_of_lagged_values_without_leakage():
     out2 = add_dynamics(df2).set_index("month")
     cols = [c for c in out.columns if c.endswith("m")]
     pd.testing.assert_frame_equal(out.loc[:"2020-09-01", cols], out2.loc[:"2020-09-01", cols])
+
+
+def test_politics_features_with_files_and_without(engine, tmp_path, monkeypatch):
+    """Regression: the EPR block must run end to end; missing files must give empty columns, not errors."""
+    import app.ml.enrichment as en
+    from app.core.db import SessionLocal
+
+    frame = pd.DataFrame({"iso3": ["UKR", "UKR"], "month": pd.to_datetime(["2020-03-01", "2020-06-01"])})
+    monkeypatch.setattr(en, "FACTOR_DIR", tmp_path)
+    with SessionLocal() as s:
+        empty = en.politics_features(s, frame)
+        assert list(empty.columns) == ["iso3", "month", *en.GROUPS["politics"]] and empty.iloc[:, 2:].isna().all().all()
+        for slug, col in (("electoral-democracy-index", "electdem_vdem__estimate_best"),
+                          ("liberal-democracy-index", "libdem_vdem__estimate_best")):
+            pd.DataFrame({"entity": "Ukraine", "code": "UKR", "year": [2018, 2019], col: [0.4, 0.5]}).to_csv(
+                tmp_path / f"owid_{slug}.csv", index=False)
+        pd.DataFrame({"entity": "Ukraine", "code": "UKR", "year": [2018, 2019],
+                      "regime_row_owid": ["Electoral autocracy", "Electoral democracy"]}).to_csv(
+            tmp_path / "owid_political-regime.csv", index=False)
+        pd.DataFrame({"gwid": [369, 369], "statename": "Ukraine", "from": [1991, 1991], "to": [2021, 2021],
+                      "group": ["A", "B"], "size": [0.7, 0.2], "status": ["SENIOR PARTNER", "POWERLESS"]}).to_csv(
+            tmp_path / "epr.csv", index=False)
+        out = en.politics_features(s, frame).set_index("month")
+    june = out.loc["2020-06-01"]  # V-Dem: year 2019 is published by April 2020
+    assert june["vdem_electoral_democracy"] == 0.5 and june["vdem_regime_type"] == 2
+    assert out.loc["2020-03-01", "vdem_electoral_democracy"] == 0.4  # before April -> 2018
+    assert june["epr_relevant_groups"] == 2 and june["epr_excluded_groups"] == 1
+    assert abs(june["epr_excluded_pop_share"] - 0.2) < 1e-9

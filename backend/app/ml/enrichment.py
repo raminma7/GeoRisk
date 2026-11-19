@@ -231,6 +231,19 @@ def politics_features(session: Session, frame: pd.DataFrame) -> pd.DataFrame:
     if epr is None:
         out = out.assign(epr_excluded_pop_share=np.nan, epr_excluded_groups=np.nan, epr_relevant_groups=np.nan)
         return out[["iso3", "month", *GROUPS["politics"]]]
+    epr["iso3"] = epr["gwid"].astype(str).map(gw_to_iso)
+    ex = epr[epr["status"].isin(["POWERLESS", "DISCRIMINATED"])]
+    rows = []
+    for y in range(int(epr["from"].min()), int(epr["to"].max()) + 1):
+        act = epr[(epr["from"] <= y) & (epr["to"] >= y)]
+        exa = ex[(ex["from"] <= y) & (ex["to"] >= y)]
+        a = act.groupby("iso3").size().rename("epr_relevant_groups")
+        e = exa.groupby("iso3").agg(epr_excluded_pop_share=("size", "sum"), epr_excluded_groups=("size", "size"))
+        df = pd.concat([a, e], axis=1).reset_index()
+        df["ey"] = y
+        rows.append(df)
+    eprm = pd.concat(rows)
+    eprm[["epr_excluded_pop_share", "epr_excluded_groups"]] = eprm[["epr_excluded_pop_share", "epr_excluded_groups"]].fillna(0)
     out["ey"] = out["month"].dt.year - 1
     out = out.merge(eprm, on=["iso3", "ey"], how="left")
     return out[["iso3", "month", *GROUPS["politics"]]]
