@@ -1,0 +1,3 @@
+97322 cbc7f0b84e251901ffa586b001506ea6 http://data.gdeltproject.org/gdeltv2/20261119094500.export.CSV.zip
+117000 e1d781208a39df3f96acda6e8bbb1c39 http://data.gdeltproject.org/gdeltv2/20261119094500.mentions.CSV.zip
+4679429 2356af6693e10c6fd1b62bf593007c88 http://data.gdeltproject.org/gdeltv2/20261119094500.gkg.csv.zip
