@@ -40,6 +40,12 @@ SOURCES: list[dict] = [
                      notes="Exports include headline/URL metadata only."),
     },
     {
+        "key": "gdelt_v1_history", "name": "GDELT 1.0 Events archive (historical news aggregates)", "module": "geopolitics",
+        "kind": "dataset", "homepage_url": "https://data.gdeltproject.org/events/index.html", "expected_interval_minutes": None,
+        "license": "GDELT data is free and open for unlimited use with citation.", "citation": GDELT_CITATION, "enabled": True,
+        "perm": dict(allow_ai_processing=True, allow_ml_training=True, allow_export=True, allow_redistribution=True),
+    },
+    {
         "key": "ucdp_ged", "name": "UCDP Georeferenced Event Dataset", "module": "geopolitics", "kind": "dataset",
         "homepage_url": "https://ucdp.uu.se/", "expected_interval_minutes": None,
         "license": "UCDP data is free to use with citation (CC BY 4.0).",

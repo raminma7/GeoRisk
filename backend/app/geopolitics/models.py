@@ -233,6 +233,39 @@ class GeopoliticalIndicator(Base):
     meta: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
 
+class NewsCountryMonthPart(Base):
+    """Per-source-file monthly news aggregates from the GDELT 1.0 archive (1979→).
+
+    One row per (archive file, country, month); the monthly value is the SUM over
+    files. Re-processing a file replaces only its own rows, so backfills are
+    idempotent and resumable. ``iso3 = 'WLD'`` rows hold world totals (each event once).
+    """
+
+    __tablename__ = "news_country_month_parts"
+    __table_args__ = (
+        UniqueConstraint("file_key", "iso3", "month"),
+        Index("ix_news_cm_iso_month", "iso3", "month"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    file_key: Mapped[str] = mapped_column(String(40), index=True)
+    iso3: Mapped[str] = mapped_column(String(3))
+    month: Mapped[date] = mapped_column(Date)
+    events: Mapped[int] = mapped_column(Integer, default=0)
+    material_conflict: Mapped[int] = mapped_column(Integer, default=0)
+    verbal_conflict: Mapped[int] = mapped_column(Integer, default=0)
+    verbal_cooperation: Mapped[int] = mapped_column(Integer, default=0)
+    material_cooperation: Mapped[int] = mapped_column(Integer, default=0)
+    violent: Mapped[int] = mapped_column(Integer, default=0)
+    threats: Mapped[int] = mapped_column(Integer, default=0)
+    protests: Mapped[int] = mapped_column(Integer, default=0)
+    diplomatic_tension: Mapped[int] = mapped_column(Integer, default=0)
+    de_escalation: Mapped[int] = mapped_column(Integer, default=0)
+    goldstein_sum: Mapped[float] = mapped_column(Float, default=0.0)
+    tone_sum: Mapped[float] = mapped_column(Float, default=0.0)
+    num_sources: Mapped[int] = mapped_column(BigInteger, default=0)
+    num_articles: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
 class UcdpEvent(Base):
     """UCDP Georeferenced Event Dataset record (human-coded, versioned)."""
 

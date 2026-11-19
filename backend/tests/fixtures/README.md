@@ -12,3 +12,4 @@ to over-represent conflict/diplomatic CAMEO codes.
 
 Source: The GDELT Project (https://www.gdeltproject.org/), UCDP (https://ucdp.uu.se/).
 The application itself never serves these fixtures; they are only loaded by tests.
+* `gdelt_v1_1989_sample.zip` — first 2,000 rows of the GDELT 1.0 archive file `1989.zip` (57-column historical format)

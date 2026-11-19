@@ -8,6 +8,7 @@
     python -m app.cli demo --hours 6            # real-data end-to-end demo
     python -m app.cli import-ucdp [--version 26.1] [--min-year 2015]
     python -m app.cli snapshots [--date 2026-11-18]
+    python -m app.cli backfill-news-history --start 1988 --end 2025   # GDELT 1.0 archive -> country-month news
     python -m app.cli labels [--horizon 1] [--start 2010-01-01]
     python -m app.cli train-baseline
     python -m app.cli analyze-crisis CRISIS_ID
@@ -105,6 +106,12 @@ def cmd_snapshots(args) -> dict:
         return build_daily_snapshots(s, as_of=as_of)
 
 
+def cmd_backfill_news_history(args) -> dict:
+    from app.ml.news_history import backfill
+
+    return backfill(args.start, args.end, workers=args.workers, max_files=args.max_files)
+
+
 def cmd_labels(args) -> dict:
     from app.ml.labels import store_labels
 
@@ -158,6 +165,12 @@ def main() -> None:
     x = sub.add_parser("snapshots")
     x.add_argument("--date", default=None)
     x.set_defaults(fn=cmd_snapshots)
+    x = sub.add_parser("backfill-news-history")
+    x.add_argument("--start", type=int, default=1988)
+    x.add_argument("--end", type=int, default=2025)
+    x.add_argument("--workers", type=int, default=4)
+    x.add_argument("--max-files", type=int, default=None)
+    x.set_defaults(fn=cmd_backfill_news_history)
     x = sub.add_parser("labels")
     x.add_argument("--horizon", type=int, default=1)
     x.add_argument("--start", default=None)
