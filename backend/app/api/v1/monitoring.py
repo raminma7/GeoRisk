@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -141,6 +141,44 @@ def overview(s: Session = Depends(get_db), _: Principal = Depends(require_read))
         "ai_enabled": get_settings().ai_provider != "none",
         "disclaimer": "Events are machine-extracted from news reports (GDELT) and are not independently verified. "
                       "Priority scores indicate analyst review priority, not probabilities of conflict.",
+    }
+
+
+@router.get("/today", summary="Plain-language overview for non-specialists: situations, severity, reasons, changes")
+def today(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
+    from app.monitoring import plain
+
+    now = utcnow()
+    sts = plain.active_stories(s, now)
+    main = [x for x in sts if x["group"] == "main"]
+    other = [x for x in sts if x["group"] == "other"]
+    ew = _early_warning(s)
+    at_risk = 0
+    if ew:
+        from app.ml import predictions as P
+
+        lv = P.count_by_level(s, ew["model_version"], date.fromisoformat(ew["window"]["start"]))
+        at_risk = (lv.get("very_high") or 0) + (lv.get("high") or 0)
+    summary = {"situations": len(main), "serious": sum(1 for x in main if x["severity"]["level"] in ("critical", "high")),
+               "getting_worse": sum(1 for x in main if x["trend"]["code"] == "up"),
+               "calming": sum(1 for x in main if x["trend"]["code"] == "down"), "countries_at_risk": at_risk}
+    return {
+        "generated_at": iso(now), "summary": summary, "situations": main[:20],
+        "other_signals": [{k: x[k] for k in ("id", "headline", "severity", "confidence", "countries", "reasons")} for x in other[:20]],
+        "other_signals_total": len(other),
+        "what_changed": plain.what_changed(s, sts, now),
+        "could_start_soon": ew,
+        "conflict_data_through": iso(plain.deaths_through()),
+        "data_freshness": {"latest_event_available_at": freshness(s).get("latest_event_available_at")},
+        "how_to_read": {
+            "severity": "How serious the situation looks right now, from the number and violence of reported incidents "
+                        "and how many news outlets report them (Critical > High > Moderate > Low).",
+            "trend": "Compared with the previous days.",
+            "confirmed": "How many independent news outlets report it. News reports are extracted automatically and are "
+                         "not verified one by one; death counts come from the UCDP research dataset.",
+            "other_signals": "Reports from a single country without verified conflict deaths (often crime or police "
+                             "news), or with very few sources. Shown separately so they don't crowd out real crises.",
+        },
     }
 
 

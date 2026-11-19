@@ -8,6 +8,8 @@ import { ClusterRow, CrisisCard, PriorityCard, type Cluster } from "@/components
 import { WatchListStrip, type Prediction } from "@/components/EarlyWarning";
 import { Card, Disclaimer, Empty, ErrorBox, LevelBadge, Loading, Stale, Stat, Verification } from "@/components/ui";
 import { qs, useApi } from "@/lib/api";
+import { useView } from "@/lib/view";
+import TodayView from "@/components/Today";
 import { ago, label, num } from "@/lib/format";
 
 const WorldMap = dynamic(() => import("@/components/WorldMap"), { ssr: false, loading: () => <Loading what="map" /> });
@@ -26,7 +28,7 @@ const CATEGORIES = [["", "All categories"], ["fight", "Fight"], ["assault", "Ass
   ["coerce", "Coerce"], ["force_posture", "Military posture"], ["threaten", "Threaten"], ["protest", "Protest"],
   ["reduce_relations", "Reduce relations"], ["yield", "Yield / de-escalate"], ["diplomatic_cooperation", "Diplomatic cooperation"]];
 
-export default function OverviewPage() {
+function AnalystOverview() {
   const router = useRouter();
   const { data, error, isLoading, mutate } = useApi<Overview>("/api/v1/overview", { refreshInterval: 60_000 });
   const [filters, setFilters] = useState({ category: "", verification: "", country: "", start: "", crisis: "" });
@@ -180,4 +182,10 @@ export default function OverviewPage() {
       </Card>
     </div>
   );
+}
+
+export default function OverviewPage() {
+  const { mode, ready } = useView();
+  if (!ready) return <Loading what="overview" />;
+  return mode === "analyst" ? <AnalystOverview /> : <TodayView />;
 }

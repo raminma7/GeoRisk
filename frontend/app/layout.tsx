@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 import Nav from "@/components/Nav";
+import { ViewProvider } from "@/lib/view";
 
 export const metadata: Metadata = {
   title: "GeoRisk — Global Geopolitical Monitoring",
@@ -18,12 +19,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="min-h-screen font-sans antialiased">
-        <Nav />
-        <main className="mx-auto max-w-[1500px] px-4 py-5">{children}</main>
+        <ViewProvider>
+          <Nav />
+          <main className="mx-auto max-w-[1500px] px-4 py-5">{children}</main>
+        </ViewProvider>
         <footer className="mx-auto max-w-[1500px] px-4 pb-8 text-xs text-muted">
-          Data: The GDELT Project (machine-extracted from news; not independently verified) · UCDP (CC BY 4.0).
-          Priority scores indicate analyst review priority — not probabilities of conflict. AI content is interpretation, not
-          ground truth.
+          Data: news reports collected automatically by The GDELT Project (not verified one by one) · verified conflict
+          deaths from UCDP (CC BY 4.0). Severity reflects what is being reported, not a prediction of war.
         </footer>
       </body>
     </html>

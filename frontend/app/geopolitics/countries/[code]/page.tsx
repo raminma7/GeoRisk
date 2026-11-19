@@ -5,6 +5,8 @@ import { use, useState } from "react";
 import { DailyStack } from "@/components/Charts";
 import { AnalysisPanel, PriorityCard, type CrisisCard } from "@/components/domain";
 import { CountryRiskCard } from "@/components/EarlyWarning";
+import { SituationCard, type Story } from "@/components/Today";
+import { useView } from "@/lib/view";
 import { Card, Empty, SourceLink, State, Stat, Tabs, Verification } from "@/components/ui";
 import { qs, useApi } from "@/lib/api";
 import { ago, label, num } from "@/lib/format";
@@ -12,7 +14,7 @@ import { ago, label, num } from "@/lib/format";
 type Country = {
   country: { iso3: string; name: string; official_name: string; region: string; continent: string; groups: string[]; aliases: string[] };
   indicators: { as_of?: string; values?: Record<string, { value: number; baseline_mean: number | null; zscore: number | null }> };
-  crises: CrisisCard[];
+  crises: (CrisisCard & { story?: Story })[];
   relationships: { country: string; name: string; interaction_clusters_7d: number; material_conflict: number; verbal_conflict: number;
     verbal_cooperation: number; material_cooperation: number; avg_goldstein: number | null }[];
   timeline: { date: string; material_conflict: number; verbal_conflict: number; cooperation: number }[];
@@ -30,6 +32,7 @@ const ROLES = [["", "Any role"], ["occurred_in", "Occurred in the country"], ["g
 export default function CountryPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
   const [tab, setTab] = useState("overview");
+  const { mode, ready, setMode } = useView();
   const [role, setRole] = useState("");
   const [cat, setCat] = useState("");
   const d = useApi<Country>(`/api/v1/countries/${code}`);
@@ -38,6 +41,25 @@ export default function CountryPage({ params }: { params: Promise<{ code: string
   return (
     <State {...d} what="country">{(c) => {
       const v = c.indicators.values || {};
+      if (ready && mode !== "analyst") return (
+        <div className="space-y-4">
+          <div>
+            <Link href="/" className="link text-sm">← Today</Link>
+            <h1 className="text-2xl font-semibold tracking-tight">{c.country.name}</h1>
+            <div className="text-xs text-muted">{c.country.region}</div>
+          </div>
+          <section className="rounded-2xl border border-line bg-surface p-4">
+            <h2 className="mb-3 font-semibold">Situations involving {c.country.name}</h2>
+            {c.crises.length === 0 ? <p className="text-sm text-muted">No ongoing situation is being followed for this country right now.</p> : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {c.crises.slice(0, 6).map((x) => x.story ? <SituationCard key={x.id} s={x.story} /> : null)}
+              </div>
+            )}
+          </section>
+          <CountryRiskCard risk={c.ml_risk} />
+          <p className="text-xs text-muted">Want events, relations and raw evidence? <button className="link" onClick={() => setMode("analyst")}>Turn on Analyst view</button></p>
+        </div>
+      );
       return (
         <div className="space-y-4">
           <div>

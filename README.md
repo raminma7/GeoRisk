@@ -28,6 +28,18 @@ alerts and keeps a full history for machine learning. The dashboard populates it
 - Further docs: [`docs/architecture.md`](docs/architecture.md) · [`docs/methodology.md`](docs/methodology.md) ·
   [`docs/data-sources.md`](docs/data-sources.md) · [`docs/economy-roadmap.md`](docs/economy-roadmap.md)
 
+## Simple view and Analyst view
+
+Everyday readers see two pages: **Today** and **Early warning**. *Today* lists the situations going on, each with a
+plain headline ("Armed conflict in Ukraine and Russia"), a severity (Critical / High / Moderate / Low), a trend, two or
+three reasons in plain words, how well it is confirmed and the last 7 days of violent reports. It also shows what changed
+since yesterday and which peaceful countries could see a new conflict. Single-country crime/police news and weakly
+confirmed reports are grouped under "Other signals".
+
+The wording is rule-based (`backend/app/monitoring/plain.py`, API `GET /api/v1/today`); no AI key is needed. Severity
+combines how intense the news is with verified deaths in the past 12 months (UCDP). The **Analyst view** switch in the
+header brings back every tool: scores, raw evidence, alerts, news, datasets, models and settings.
+
 ## Early warning (experimental ML)
 A separate **model service** ([`model-service/`](model-service)) serves a model that ranks countries without recent
 conflict by their risk of a **new** conflict (≥ 25 deaths within 3 months) over the next window. It's trained on UCDP

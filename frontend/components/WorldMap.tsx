@@ -157,7 +157,10 @@ export default function WorldMap({ crises = [], events, highlight = [], height =
       if (id && onCrisisClick) onCrisisClick(id);
     });
     map.current = m;
-    return () => { m.remove(); map.current = null; ready.current = false; };
+    // Keep the canvas matched to its container (grid layouts can settle after the map is created).
+    const ro = new ResizeObserver(() => m.resize());
+    ro.observe(ref.current);
+    return () => { ro.disconnect(); m.remove(); map.current = null; ready.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

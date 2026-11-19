@@ -26,6 +26,7 @@ from app.core.security import Principal, require_read, require_role
 from app.crises.models import Crisis, CrisisArticle, CrisisEvent, CrisisEvidenceLog, CrisisParticipant, CrisisSnapshot
 from app.geopolitics.models import VERIFICATION_MULTI_SOURCE, EventCluster, NewsArticle, NormalizedGeopoliticalEvent
 from app.ingestion.models import AuditLog
+from app.monitoring import plain
 from app.monitoring.models import MonitoringPriority
 from app.registry.models import Actor, Country, Region
 
@@ -93,6 +94,8 @@ def crisis_detail(crisis_id: str, s: Session = Depends(get_db), _: Principal = D
         "related_articles": [ser_article(a) for a in arts],
         "review": {"needs_review": c.needs_review, "note": c.review_note, "reviewed_by": c.reviewed_by},
         "spillover_risk": _spillover(s, str(c.id)),
+        "story": plain.stories(s, [c])[0],
+        "recent_incidents": plain.recent_incidents(s, c.id),
         "meta": c.meta,
     }
 

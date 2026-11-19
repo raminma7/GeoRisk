@@ -84,7 +84,11 @@ def _country_crises(s: Session, iso3: str) -> list[dict]:
     q = select(Crisis).where(Crisis.status.in_(["candidate", "active", "dormant"]),
                              or_(Crisis.core_country_iso3s.contains([iso3]), Crisis.location_country_iso3s.contains([iso3]))
                              ).order_by(desc(Crisis.current_priority))
-    return [ser_crisis_card(c, regions.get(c.region_id), names) for c in s.scalars(q)]
+    from app.monitoring import plain
+
+    cs = list(s.scalars(q))
+    stories = {st["id"]: st for st in plain.stories(s, cs, with_activity=False)}
+    return [{**ser_crisis_card(c, regions.get(c.region_id), names), "story": stories.get(c.id)} for c in cs]
 
 
 def _relationships(s: Session, cid: int, limit: int = 15) -> list[dict]:

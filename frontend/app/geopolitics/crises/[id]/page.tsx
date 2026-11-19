@@ -8,6 +8,9 @@ import { AnalysisPanel, ClusterRow, type Cluster, type CrisisCard } from "@/comp
 import { SpilloverCard, type Prediction } from "@/components/EarlyWarning";
 import { Card, Confidence, CountryChips, Direction, Disclaimer, Empty, LevelBadge, Loading, SourceLink, State, Tabs, Verification } from "@/components/ui";
 import { post, qs, useApi } from "@/lib/api";
+import { useView } from "@/lib/view";
+import SimpleCrisis, { type Incident } from "@/components/SimpleCrisis";
+import type { Story } from "@/components/Today";
 import { ago, fmtDate, label, num } from "@/lib/format";
 
 const WorldMap = dynamic(() => import("@/components/WorldMap"), { ssr: false, loading: () => <Loading what="map" /> });
@@ -22,6 +25,7 @@ type Detail = CrisisCard & {
   related_articles: { id: number; title: string; url: string; domain: string; language: string; source_country: string; seen_at: string }[];
   review: { needs_review: boolean; note: string | null; reviewed_by: string | null };
   spillover_risk: Prediction[];
+  story: Story; recent_incidents: Incident[];
 };
 type Timeline = { events: { total: number; items: Cluster[] }; verification_breakdown: Record<string, number>;
   verification_legend: Record<string, string>; daily: { date: string; material_conflict: number; verbal_conflict: number; cooperation: number }[];
@@ -35,6 +39,7 @@ export default function CrisisPage({ params }: { params: Promise<{ id: string }>
   const t = useApi<Timeline>(`/api/v1/crises/${id}/timeline${qs({ limit: 100, verification: ver })}`);
   const mapEvents = useApi<{ features: never[] }>(`/api/v1/events${qs({ view: "map", crisis: id, limit: 300, start: "2000-01-01" })}`);
   const [reviewMsg, setReviewMsg] = useState<string | null>(null);
+  const { mode, ready } = useView();
 
   const review = async (action: string) => {
     setReviewMsg(null);
@@ -46,6 +51,11 @@ export default function CrisisPage({ params }: { params: Promise<{ id: string }>
     <State {...d} what="crisis">{(c) => {
       const p = c.priority_detail;
       const pts = (mapEvents.data?.features || []).map((f: { geometry: { coordinates: [number, number] } }) => f.geometry.coordinates);
+      if (!ready) return <Loading what="crisis" />;
+      if (mode !== "analyst" && c.story) return (
+        <SimpleCrisis story={c.story} incidents={c.recent_incidents || []} spillover={c.spillover_risk} summary={c.summary}
+          crisis={{ ...c.story, uid: c.uid }} events={mapEvents.data?.features} fitTo={pts.length ? pts : undefined} />
+      );
       return (
         <div className="space-y-4">
           <div>

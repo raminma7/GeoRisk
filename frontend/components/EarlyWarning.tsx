@@ -156,7 +156,7 @@ export function ExperimentalBadge() {
   );
 }
 
-export function CountryRiskRow({ p, max }: { p: Prediction; max: number }) {
+export function CountryRiskRow({ p, max, maxReasons = 3 }: { p: Prediction; max: number; maxReasons?: number }) {
   return (
     <Link href={`/geopolitics/countries/${p.iso3}`}
       className="group grid grid-cols-[2.5rem_1fr] gap-x-3 gap-y-2 rounded-xl px-3 py-3 transition hover:bg-accent/5 md:grid-cols-[2.5rem_14rem_1fr_10rem]">
@@ -165,7 +165,7 @@ export function CountryRiskRow({ p, max }: { p: Prediction; max: number }) {
         <div className="truncate font-medium group-hover:text-accent">{p.name || p.iso3}</div>
         <div className="truncate text-xs text-muted">{p.region || p.iso3}</div>
       </div>
-      <div className="col-start-2 min-w-0 md:col-start-auto"><ReasonList reasons={p.reasons} compact /></div>
+      <div className="col-start-2 min-w-0 md:col-start-auto"><ReasonList reasons={p.reasons} max={maxReasons} compact /></div>
       <div className="col-start-2 flex items-center gap-3 md:col-start-auto md:flex-col md:items-end md:gap-1.5">
         <div className="flex items-center gap-2"><TimesAverage value={p.times_average} /><LevelChip level={p.level} /></div>
         <div className="w-28 md:w-full"><RiskBar value={p.times_average || 0} max={max} level={p.level} /></div>

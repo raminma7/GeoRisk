@@ -1,5 +1,6 @@
 "use client";
 
+import { useView } from "@/lib/view";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -78,6 +79,7 @@ function SetupCard({ data }: { data: WatchList }) {
 
 export default function EarlyWarningPage() {
   const router = useRouter();
+  const { mode } = useView();
   const [level, setLevel] = useState<"" | Level>("");
   const [showAll, setShowAll] = useState(false);
   const [region, setRegion] = useState("");
@@ -114,7 +116,7 @@ export default function EarlyWarningPage() {
 
   const m = data.meta;
   const items = data.items.filter((p) => !level || p.level === level);
-  const visible = showAll ? items : items.slice(0, 20);
+  const visible = showAll ? items : items.slice(0, mode === "analyst" ? 20 : 10);
   const max = Math.max(...data.items.map((p) => p.times_average || 0), 1);
   const q = m.test_quality;
 
@@ -126,7 +128,7 @@ export default function EarlyWarningPage() {
         <div className="relative flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
             <div className="mb-3 flex flex-wrap items-center gap-2"><ExperimentalBadge />
-              <span className="text-xs text-muted">Updated {fmtDate(m.generated_at, false)} · model {m.model_version}</span></div>
+              <span className="text-xs text-muted">Updated {fmtDate(m.generated_at, false)} {mode === "analyst" && <> · model {m.model_version}</>}</span></div>
             <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Where could a new conflict start?</h1>
             <p className="mt-2 text-ink2">
               Countries ranked by their modelled risk of a <b>new</b> armed conflict in <b>{monthRange(m.window)}</b> —
@@ -189,7 +191,7 @@ export default function EarlyWarningPage() {
           <span>Rank</span><span>Country</span><span>Main reasons</span><span className="text-right">Risk vs. average</span>
         </div>
         {visible.length === 0 ? <Empty>No countries match this filter.</Empty> : (
-          <div className="divide-y divide-line">{visible.map((p) => <CountryRiskRow key={p.iso3} p={p} max={max} />)}</div>
+          <div className="divide-y divide-line">{visible.map((p) => <CountryRiskRow key={p.iso3} p={p} max={max} maxReasons={mode === "analyst" ? 3 : 2} />)}</div>
         )}
         {items.length > 20 && (
           <div className="pt-3 text-center">
