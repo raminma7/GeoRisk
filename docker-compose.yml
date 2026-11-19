@@ -73,6 +73,9 @@ services:
     volumes:
       - georisk_data:/data:ro
     ports: ["8100:8100"]
+    depends_on:
+      # the api container initialises the shared volume (owned by its non-root user) first
+      api: {condition: service_healthy}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8100/health"]
       interval: 15s
