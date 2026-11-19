@@ -330,6 +330,8 @@ def evaluate(df: pd.DataFrame, features: list[str], test_years: list[int]) -> di
     allp = pd.concat(preds)
     res = {}
     for name, sub in (("all", allp), ("onset", allp[allp.is_onset_risk_row == 1]), ("ongoing", allp[allp.is_onset_risk_row == 0])):
+        if sub.empty:
+            continue
         y, p = sub[TARGET].astype(int).to_numpy(), sub["p"].to_numpy()
         m = _metrics(y, p)
         m.pop("calibration", None)
