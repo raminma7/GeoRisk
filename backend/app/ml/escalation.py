@@ -49,7 +49,7 @@ SITE_FEATURES = ["all_deaths_l1", "all_deaths_l3", "all_deaths_l12", "tier_now",
                  "ns_events_l12", "os_events_l12", "news_violent_vs_normal", "news_protest_share",
                  "news_diplomatic_tension_share"]
 INDEX_FEATURES = ["idx_score", "idx_level", "idx_violence", "idx_military", "idx_tension", "idx_unrest", "idx_momentum",
-                  "idx_score_chg_3m"]
+                  "idx_score_chg_3m", "idx_recent_surge"]
 
 
 def features() -> list[str]:
@@ -131,7 +131,7 @@ def build_frame(session: Session, forecast: bool = False) -> pd.DataFrame:
     out = df.merge(site_features(cm, news), on=["iso3", "month"], how="left")
     hist = CI.historical(session, cm)
     cuts = CI.level_cuts(hist[(hist["month"] >= "1990-01-01") & (hist["month"] < "2026-01-01")]["idx_score"])
-    idx_cols = ["iso3", "month", "idx_score", *[f"idx_{k}" for k in CI.DIMENSIONS]]
+    idx_cols = ["iso3", "month", "idx_score", "idx_recent_surge", *[f"idx_{k}" for k in CI.DIMENSIONS]]
     out = out.merge(hist[idx_cols], on=["iso3", "month"], how="left")
     out = out.merge(index_labels(hist, cuts), on=["iso3", "month"], how="left")
     out.attrs = {**df.attrs, "index_cuts": cuts}

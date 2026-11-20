@@ -68,6 +68,7 @@ LABELS: dict[str, tuple[str, str]] = {
     "idx_unrest": ("Unrest (index part)", "score100"),
     "idx_momentum": ("Conflict news vs normal (index part)", "score100"),
     "idx_score_chg_3m": ("Change of the crisis index in 3 months", "signed_int"),
+    "idx_recent_surge": ("Fighting news in the last 2 weeks vs before", "ratio"),
 }
 TIERS = {0: "Low", 1: "Moderate", 2: "High", 3: "Critical"}
 REGIMES = {0: "Closed autocracy", 1: "Electoral autocracy", 2: "Electoral democracy", 3: "Liberal democracy"}

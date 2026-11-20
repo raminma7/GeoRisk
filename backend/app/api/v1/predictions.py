@@ -88,13 +88,13 @@ def country_risk(session: Session, iso3: str) -> dict | None:
             "outlook": o3, "outlook_6m": o6, "history": P.history(session, iso3), "explainer": EXPLAINER}
 
 
-DIRECTION_ORDER = {"worse": 0, "better": 1, "same": 2}
+DIRECTION_ORDER = {"worse": 0, "uncertain": 1, "better": 2, "same": 3}
 TIER_ORDER = {"critical": 0, "high": 1, "elevated": 2, "low": 3}
 
 
 @router.get("", summary="Outlook for every country: could get worse, could get better, or likely to stay the same")
 def watch_list(limit: int = Query(300, ge=1, le=300), region: str | None = None,
-               direction: str | None = Query(None, pattern="^(worse|better|same)$"),
+               direction: str | None = Query(None, pattern="^(worse|better|same|uncertain)$"),
                s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     meta = _meta(s)
     if meta is None:
@@ -114,7 +114,7 @@ def watch_list(limit: int = Query(300, ge=1, le=300), region: str | None = None,
         items.append({"iso3": iso3, "name": names.get(iso3, iso3), "region": regions.get(iso3),
                       "current_tier": o["current_tier"], "to_tier": o["to_tier"], "direction": o["direction"],
                       "label": o["label"],
-                      "chance": o["chance"], "reasons": o["reasons"],
+                      "chance": o["chance"], "reasons": o["reasons"], "note": o.get("note"),
                       "six_months": {"direction": six["direction"], "label": six["label"], "chance": six["chance"],
                                      "to_tier": six["to_tier"]}
                       if six else None})
@@ -123,7 +123,8 @@ def watch_list(limit: int = Query(300, ge=1, le=300), region: str | None = None,
         items = [x for x in items if x["direction"] == direction]
     # strongest signals first; 'same' sorted by how serious the situation is now
     items.sort(key=lambda x: (DIRECTION_ORDER[x["direction"]],
-                              -(x["chance"] or 0) if x["direction"] != "same" else TIER_ORDER.get(x["current_tier"] or "low", 4),
+                              -(x["chance"] or 0) if x["direction"] in ("worse", "better")
+                              else TIER_ORDER.get(x["current_tier"] or "low", 4),
                               x["name"]))
     return {"meta": meta, "counts": counts, "total": len(items), "items": items[:limit]}
 

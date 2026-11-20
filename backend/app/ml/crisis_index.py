@@ -77,6 +77,12 @@ def shares(df: pd.DataFrame) -> pd.DataFrame:
     }, index=df.index)
 
 
+def material_share(df: pd.DataFrame) -> pd.Series:
+    """Share of news about fighting and military action (CAMEO 15-20), shrunk towards the world average."""
+    ev = df["ev"].where(df["ev"] >= MIN_EVENTS)
+    return (df["mc"] + PRIOR_EVENTS * (PRIOR["violent"] + PRIOR["military"])) / (ev + PRIOR_EVENTS)
+
+
 def _monthly_news(session: Session) -> pd.DataFrame:
     df = pd.read_sql(text(
         "SELECT iso3, month, sum(events) AS ev, sum(violent) AS v, sum(material_conflict) AS mc, sum(threats) AS th, "
@@ -171,7 +177,17 @@ def historical(session: Session, cm: pd.DataFrame, weights: dict | None = None) 
     n = n.merge(wratio, left_on="month", right_index=True, how="left")
     n["ratio"] = n["conflict_share"] / norm / n["wratio"]
 
+    # short-term surge: fighting + military news (material conflict) of the latest month vs the 3 months before,
+    # corrected for the worldwide change; catches fresh escalation that the 12-month normal can hide
+    n["mat_share"] = material_share(n.fillna({"ev": 0}))
+    wmat = material_share(world).rename("wmat")
+    wsurge = (wmat / wmat.shift(1).rolling(3, min_periods=2).mean()).rename("wsurge")
+    n = n.merge(wsurge, left_on="month", right_index=True, how="left")
+    base3 = n.groupby("iso3")["mat_share"].transform(lambda x: x.shift(1).rolling(3, min_periods=2).mean())
+    n["surge"] = n["mat_share"] / base3 / n["wsurge"]
+
     out = n[["iso3", "month"]].copy()
+    out["idx_recent_surge"] = n.groupby("iso3")["surge"].shift(1).to_numpy()  # row t sees month t-1
     # "now" at month t: news of t-1, deaths over t-12..t-1, momentum of t-1
     lag = n.groupby("iso3")[["ev", "v", "mc", "th", "dt", "pr", "ratio"]].shift(1)
     deaths12 = g["all_deaths"].transform(lambda x: x.shift(1).rolling(12, min_periods=1).sum())
@@ -194,9 +210,8 @@ def historical(session: Session, cm: pd.DataFrame, weights: dict | None = None) 
 def live(session: Session, today: date | None = None, weights: dict | None = None) -> dict[str, dict]:
     """Index per country now: news of the last 30 days (GDELT daily files), verified deaths of the latest 12 months
     (UCDP), momentum vs the country's previous 12 months corrected for the worldwide change."""
-    from app.monitoring.plain import conflict_deaths_12m
-
     from app.core.runtime_settings import get_value
+    from app.monitoring.plain import conflict_deaths_12m
 
     today = today or date.today()
     weights = weights or get_value(session, "crisis_index_weights")
@@ -221,6 +236,7 @@ def live(session: Session, today: date | None = None, weights: dict | None = Non
     wr = (sh_now.at["WLD", "conflict"] / before_conflict.at["WLD"]
           if "WLD" in sh_now.index and "WLD" in before_conflict.index else 1.0)
     ratio = (sh_now["conflict"] / before_conflict.reindex(sh_now.index)) / wr
+    surge = recent_surge(session, today)
     deaths = conflict_deaths_12m(session)
     isos = [i for i in sh_now.index if i != "WLD"]
     sh_now = sh_now.loc[isos]
@@ -237,9 +253,38 @@ def live(session: Session, today: date | None = None, weights: dict | None = Non
         sc = scores.get(iso)
         out[iso] = {"score": None if pd.isna(sc) else float(sc), "level": level_of(sc, cuts),
                     "dimensions": {k: (None if pd.isna(dims.at[iso, k]) else float(dims.at[iso, k])) for k in DIMENSIONS},
-                    "deaths_12m": deaths.get(iso, 0), "news_events_30d": int(recent.at[iso, "ev"]) if iso in recent.index else 0}
+                    "deaths_12m": deaths.get(iso, 0), "news_events_30d": int(recent.at[iso, "ev"]) if iso in recent.index else 0,
+                    "recent_surge": surge.get(iso)}
     _cache[key] = (time.time(), out)
     return out
+
+
+SURGE_SHORT_DAYS, SURGE_BASE_DAYS = 14, 90
+SURGE_MIN_EVENTS = 1000   # news events in the last 14 days; fewer is too noisy to call a surge
+
+
+def recent_surge(session: Session, today: date) -> dict[str, float]:
+    """Fighting + military news of the last 14 days vs the 90 days before, per country, corrected for the worldwide
+    change (1.0 = as before; 2.0 = twice as much). From the GDELT daily files."""
+    t0 = today - timedelta(days=SURGE_SHORT_DAYS)
+    b0 = t0 - timedelta(days=SURGE_BASE_DAYS)
+    rows = pd.read_sql(text(
+        "WITH f AS (SELECT iso3, to_date(left(file_key, 8), 'YYYYMMDD') AS d, events, material_conflict "
+        "  FROM news_country_month_parts WHERE file_key ~ '^[0-9]{8}[.]' "
+        "  AND to_date(left(file_key, 8), 'YYYYMMDD') >= :b0 AND to_date(left(file_key, 8), 'YYYYMMDD') < :t) "
+        "SELECT iso3, d >= :t0 AS short, sum(events) AS ev, sum(material_conflict) AS mc FROM f GROUP BY 1, 2"),
+        session.connection(), params={"b0": b0, "t0": t0, "t": today})
+    if rows.empty:
+        return {}
+    short = rows[rows["short"]].set_index("iso3")
+    short = short[(short["ev"] >= SURGE_MIN_EVENTS) | (short.index == "WLD")]
+    base = rows[~rows["short"]].set_index("iso3")
+    s_short, s_base = material_share(short), material_share(base)
+    if "WLD" not in s_short.index or "WLD" not in s_base.index:
+        return {}
+    w = s_short["WLD"] / s_base["WLD"]
+    ratio = (s_short / s_base.reindex(s_short.index)) / w
+    return {i: round(float(v), 2) for i, v in ratio.items() if i != "WLD" and pd.notna(v)}
 
 
 def cuts_for(session: Session, weights: dict | None = None) -> dict[str, float]:

@@ -92,7 +92,7 @@ export function ActivityBars({ data, height = 28 }: { data: Story["activity"]; h
 /* The model's outlook on a country card: better / worse / same in the next 3 and 6 months. */
 function Outlook({ o }: { o: CountryStory["outlook"] }) {
   if (!o) return null;
-  const to = o.direction !== "same" && o.current_tier && o.to_tier
+  const to = (o.direction === "worse" || o.direction === "better") && o.current_tier && o.to_tier
     ? <span className="text-muted">({TIER_LABEL[o.current_tier]} → {TIER_LABEL[o.to_tier]})</span> : null;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-raised px-2.5 py-1.5 text-xs ring-1 ring-inset ring-line">

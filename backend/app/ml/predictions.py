@@ -96,6 +96,8 @@ def _with_live_index(session: Session, df: pd.DataFrame, rows: pd.DataFrame, t0)
             rows.at[iso, f"idx_{k}"] = np.nan if x is None else x
         if iso in before.index and pd.notna(before[iso]):
             rows.at[iso, "idx_score_chg_3m"] = v["score"] - before[iso]
+        if v.get("recent_surge") is not None:
+            rows.at[iso, "idx_recent_surge"] = v["recent_surge"]
     rows = rows.reset_index()
     rows["tier_now"] = rows["idx_level"].fillna(0).astype(int)   # current level on the crisis index
     return rows
@@ -202,7 +204,38 @@ def _watchlist_alerts(session: Session, values: list[dict]) -> None:
 
 
 # ------------------------------------------------------------------ reads
-OUTLOOK_LABELS = {"worse": "Could get worse", "better": "Could get better", "same": "Likely to stay the same"}
+OUTLOOK_LABELS = {"worse": "Could get worse", "better": "Could get better", "same": "Likely to stay the same",
+                  "uncertain": "Uncertain"}
+SURGE_UP, SURGE_DOWN = 1.5, 0.6   # fighting news of the last 2 weeks vs the 90 days before
+
+
+def guard(o: dict, trend: str | None, surge: float | None) -> dict:
+    """The outlook must not contradict this week's evidence. The models lean on verified deaths, which lag about two
+    months: 'better' while fighting is picking up now (or 'worse' while it is clearly calming) becomes 'uncertain'."""
+    up = trend == "up" or (surge is not None and surge >= SURGE_UP)
+    down = trend == "down" and (surge is None or surge <= SURGE_DOWN)
+    if o["direction"] == "better" and up:
+        return {**o, "direction": "uncertain", "label": OUTLOOK_LABELS["uncertain"], "model_direction": "better",
+                "note": "The model expected improvement, but fighting has picked up in recent days."}
+    if o["direction"] == "worse" and down:
+        return {**o, "direction": "uncertain", "label": OUTLOOK_LABELS["uncertain"], "model_direction": "worse",
+                "note": "The model expected a worsening, but it has been calmer in recent days."}
+    return o
+
+
+def live_trends(session: Session) -> dict[str, str]:
+    """'up' / 'down' per country from the followed situations taking place there (24h vs the days before)."""
+    from app.crises.models import Crisis
+
+    out: dict[str, str] = {}
+    for c in session.scalars(select(Crisis).where(Crisis.status.in_(["candidate", "active"]),
+                                                  Crisis.direction.in_(["escalating", "de_escalating"]))):
+        for iso in c.location_country_iso3s or []:
+            if c.direction == "escalating":
+                out[iso] = "up"
+            elif out.get(iso) != "up":
+                out[iso] = "down"
+    return out
 LEVEL_ORDER = ["low", "elevated", "high", "critical"]
 
 
@@ -239,16 +272,24 @@ def outlooks(session: Session, h: int = 3) -> dict[str, dict]:
             window = {"start": p.window_start.isoformat(), "end": p.window_end.isoformat()}
     tw = stored_model_info(session, MODELS[h]).get("decision_threshold") or 0.15
     tb = stored_model_info(session, CALM_MODELS[h]).get("decision_threshold") or 0.27
+    trends = live_trends(session)
+    try:
+        from app.ml import crisis_index as CI
+
+        surges = {iso: v.get("recent_surge") for iso, v in CI.live(session).items()}
+    except Exception:  # noqa: BLE001 - the outlook still works without the live news signal
+        surges = {}
     for iso3, r in rows.items():
         w, b = r.get("worse"), r.get("better")
-        o = outlook(w, b, tw, tb)
+        o = guard(outlook(w, b, tw, tb), trends.get(iso3), surges.get(iso3))
         main = w if o["direction"] == "worse" else b if o["direction"] == "better" else None
         tier = (w or b).current_tier if (w or b) else None
         to = None  # the level it would move to (at least one step)
-        if tier in LEVEL_ORDER and o["direction"] != "same":
+        if tier in LEVEL_ORDER and o["direction"] in ("worse", "better"):
             i = LEVEL_ORDER.index(tier) + (1 if o["direction"] == "worse" else -1)
             to = LEVEL_ORDER[max(0, min(3, i))]
-        o.update(current_tier=tier, to_tier=to, window=window, reasons=(main.reasons if main is not None else [])[:3])
+        o.update(current_tier=tier, to_tier=to, window=window, reasons=(main.reasons if main is not None else [])[:3],
+                 data_through=(w or b).data_through.isoformat() if (w or b) else None, recent_surge=surges.get(iso3))
         out[iso3] = o
     return out
 def latest_window(session: Session, name: str = MODEL) -> tuple[str, object] | None:

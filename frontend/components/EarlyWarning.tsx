@@ -98,11 +98,12 @@ export function ExperimentalBadge() {
   );
 }
 
-export type Direction = "worse" | "better" | "same";
+export type Direction = "worse" | "better" | "same" | "uncertain";
 export const OUTLOOK: Record<Direction, { label: string; icon: string; chip: string; fill: string }> = {
   worse: { label: "Could get worse", icon: "↗", chip: "bg-crit/12 text-crit ring-crit/30", fill: "#d03b3b" },
   better: { label: "Could get better", icon: "↘", chip: "bg-good/12 text-good ring-good/30", fill: "#0ca30c" },
   same: { label: "Likely to stay the same", icon: "→", chip: "bg-line/50 text-ink2 ring-line", fill: "#c9c8c1" },
+  uncertain: { label: "Uncertain", icon: "?", chip: "bg-warn/15 text-[rgb(150_95_0)] dark:text-warn ring-warn/40", fill: "#fab219" },
 };
 
 /* Outlook chip: direction (with arrow + text) and, for worse / better, the model's chance in %. */
@@ -110,8 +111,8 @@ export function OutlookChip({ direction, chance, size = "sm" }: { direction: Dir
   const o = OUTLOOK[direction];
   return (
     <span className={`inline-flex items-center gap-1 rounded-full font-medium ring-1 ring-inset ${o.chip} ${size === "md" ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-xs"}`}>
-      <span aria-hidden>{o.icon}</span>{direction === "same" ? "Same" : direction === "worse" ? "Worse" : "Better"}
-      {direction !== "same" && chance != null && <span className="font-normal opacity-80">· {Math.round(chance * 100)}%</span>}
+      <span aria-hidden>{o.icon}</span>{({ same: "Same", worse: "Worse", better: "Better", uncertain: "Uncertain" } as const)[direction]}
+      {(direction === "worse" || direction === "better") && chance != null && <span className="font-normal opacity-80">· {Math.round(chance * 100)}%</span>}
     </span>
   );
 }
@@ -119,7 +120,7 @@ export function OutlookChip({ direction, chance, size = "sm" }: { direction: Dir
 export const TIER_LABEL: Record<string, string> = { low: "Low", elevated: "Moderate", high: "High", critical: "Critical" };
 
 type CountryOutlook = { direction: Direction; label: string; chance: number | null; reasons: Reason[];
-  window: { start: string; end: string } | null };
+  window: { start: string; end: string } | null; note?: string | null; data_through?: string | null };
 
 export function CountryRiskCard({ risk }: { risk: (Prediction & { outlook?: CountryOutlook | null;
   outlook_6m?: CountryOutlook | null; explainer: { caveat: string } }) | null }) {
@@ -136,21 +137,25 @@ export function CountryRiskCard({ risk }: { risk: (Prediction & { outlook?: Coun
         <div className="rounded-xl bg-raised p-4 ring-1 ring-inset ring-line">
           <div className="text-xs text-muted">Next 3 months{o.window ? ` · ${monthRange(o.window)}` : ""}</div>
           <div className="mt-2"><OutlookChip direction={o.direction} chance={o.chance} size="md" /></div>
-          <div className="mt-1 text-sm font-medium">{o.label}</div>
+          {o.direction !== "uncertain" && <div className="mt-1 text-sm font-medium">{o.label}</div>}
+          {o.note && <div className="mt-1 text-xs text-ink2">{o.note}</div>}
         </div>
         {six && (
           <div className="rounded-xl bg-raised p-4 ring-1 ring-inset ring-line">
             <div className="text-xs text-muted">Next 6 months{six.window ? ` · ${monthRange(six.window)}` : ""}</div>
             <div className="mt-2"><OutlookChip direction={six.direction} chance={six.chance} size="md" /></div>
-            <div className="mt-1 text-sm font-medium">{six.label}</div>
+            {six.direction !== "uncertain" && <div className="mt-1 text-sm font-medium">{six.label}</div>}
           </div>
         )}
       </div>
-      {o.direction !== "same" && o.reasons.length > 0 && (
+      {(o.direction === "worse" || o.direction === "better") && o.reasons.length > 0 && (
         <div className="mt-4">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Why</h3>
           <ReasonList reasons={o.reasons} max={3} towardsBetter={o.direction === "better"} />
         </div>
+      )}
+      {o.data_through && (
+        <p className="mt-3 text-[11px] text-muted">Verified deaths up to {monthLabel(o.data_through)}; news up to today.</p>
       )}
     </section>
   );
