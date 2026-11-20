@@ -7,9 +7,9 @@
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { Card, ErrorBox, Loading, Stale, Stat } from "@/components/ui";
+import { Card, ErrorBox, Loading, Stat } from "@/components/ui";
 import { qs, useApi } from "@/lib/api";
-import { ago, num } from "@/lib/format";
+import { agoWords, num, useNow } from "@/lib/format";
 
 const WorldMap = dynamic(() => import("@/components/WorldMap"), { ssr: false, loading: () => <Loading what="map" /> });
 
@@ -31,6 +31,25 @@ const SHOW = [["violent", "Violent events"], ["all", "All reported events"]] as 
 const PERIOD = [["1", "Last 24 hours"], ["3", "Last 3 days"], ["7", "Last 7 days"]] as const;
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+
+const FRESH_MINUTES = 45;  // three missed 15-minute updates
+
+/* One plain line about how fresh the news data is; ticks every 30 seconds. */
+function DataFreshness({ at }: { at?: string | null }) {
+  const now = useNow();
+  if (!at) return <p className="text-sm text-serious">⚠ No news data collected yet. The first update arrives within about 15 minutes.</p>;
+  const fresh = now - new Date(at).getTime() <= FRESH_MINUTES * 60_000;
+  return fresh ? (
+    <p className="flex items-center gap-1.5 text-sm text-muted">
+      <span aria-hidden className="h-2 w-2 rounded-full bg-good" />
+      News data updated {agoWords(at, now)} · checks for new events every 15 minutes
+    </p>
+  ) : (
+    <p className="text-sm text-serious" title="See Admin → Data collection health">
+      ⚠ News data last updated {agoWords(at, now)} — the data collector may be stopped
+    </p>
+  );
+}
 
 export default function GlobalOverview() {
   const router = useRouter();
@@ -61,23 +80,16 @@ export default function GlobalOverview() {
 
   if (error) return <ErrorBox error={error} retry={mutate} />;
   if (isLoading || !data) return <Loading what="overview" />;
-  const fresh = data.data_freshness as Record<string, { last_success_at: string | null }> & { latest_event_available_at?: string };
+  const fresh = data.data_freshness as Record<string, { last_success_at: string | null }>;
   const nEvents = events.data?.features.length ?? 0;
   const totalEvents = events.data?.total ?? nEvents;
   const sm = today.data?.summary;
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Global Overview</h1>
-          <p className="text-sm text-muted">Updated automatically from news worldwide. Refreshed {ago(data.generated_at)}.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-muted">GDELT events</span><Stale at={fresh.gdelt_events?.last_success_at} />
-          <span className="text-muted">News</span><Stale at={fresh.gdelt_doc?.last_success_at} maxMinutes={90} />
-          <span className="text-muted">Latest event</span><span>{ago(fresh.latest_event_available_at as unknown as string)}</span>
-        </div>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Global Overview</h1>
+        <DataFreshness at={fresh.gdelt_events?.last_success_at} />
       </div>
 
       {/* Same numbers as the map below: countries by colour, and the violent-event dots of the last 24 hours. */}

@@ -9,7 +9,6 @@ import { useState } from "react";
 import { LevelChip, monthRange, type Prediction } from "@/components/EarlyWarning";
 import { ErrorBox, Loading } from "@/components/ui";
 import { useApi } from "@/lib/api";
-import { ago } from "@/lib/format";
 
 
 export type Story = {
@@ -199,12 +198,7 @@ export default function TodayView() {
   return (
     <div className="space-y-5">
       <header className="space-y-3">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h2 className="text-xl font-semibold tracking-tight">What is happening in the world</h2>
-            <p className="text-sm text-muted">Updated automatically from news worldwide · latest report {ago(data.data_freshness.latest_event_available_at)}</p>
-          </div>
-        </div>
+        <h2 className="text-xl font-semibold tracking-tight">What is happening in the world</h2>
         <SummaryLine t={data} />
       </header>
 
