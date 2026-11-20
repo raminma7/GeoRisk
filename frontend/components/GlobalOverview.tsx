@@ -100,7 +100,7 @@ export default function GlobalOverview() {
             label={<span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3 rounded-sm" style={{ background: SEVERITY_FILL[l] }} />
               {{ critical: "Critical", high: "High", elevated: "Moderate" }[l]}</span>} />
         ))}
-        <Stat label="Violent events since yesterday" value={num(sm?.violent_events_24h)} hint="reported in the news, deduplicated" />
+        <Stat label="Violent events since yesterday" value={num(sm?.violent_events_24h)} hint="dots on the map, deduplicated" />
         <Stat label="Countries with violence since yesterday" value={num(sm?.countries_with_violence_24h)} hint="where those events happened" />
       </div>
 

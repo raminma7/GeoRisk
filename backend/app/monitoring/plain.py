@@ -276,12 +276,13 @@ def _country_activity(s: Session, isos: list[str], now: datetime, days: int = 7)
 
 def violence_totals(s: Session, now: datetime | None = None) -> dict:
     """Violent events reported worldwide since the start of yesterday (UTC; deduplicated) and how many countries they
-    happened in. Same window as the map's default 'since yesterday' dots."""
+    happened in. Same window and same events as the map's default 'since yesterday' dots: only events with a known
+    location (a few news reports name no place, so they cannot be drawn and are not counted either)."""
     now = now or utcnow()
     start = datetime.combine(now.date() - timedelta(days=1), datetime.min.time(), tzinfo=now.tzinfo)
     n, countries = s.execute(text(
         "SELECT count(*), count(DISTINCT action_country_iso3) FROM event_clusters WHERE kind = 'event' "
-        "AND quad_class = 4 AND last_seen_at >= :t"), {"t": start}).one()
+        "AND quad_class = 4 AND latitude IS NOT NULL AND last_seen_at >= :t"), {"t": start}).one()
     return {"violent_events_24h": n or 0, "countries_with_violence_24h": countries or 0}
 
 
