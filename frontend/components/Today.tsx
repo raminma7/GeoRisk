@@ -143,7 +143,9 @@ function WhatChanged({ w }: { w: Today["what_changed"] }) {
   const icon = { worse: ["↗", "text-crit bg-crit/10"], better: ["↘", "text-good bg-good/10"], new: ["✦", "text-accent bg-accent/10"] };
   return (
     <section className="rounded-2xl border border-line bg-surface p-4">
-      <h2 className="mb-2 font-semibold">What changed</h2>
+      <h2 className="font-semibold">What changed</h2>
+      <p className="mb-3 text-xs text-muted">Countries whose severity went up or down since yesterday, countries that are new on the list,
+        and places where violence is rising or calming down. Click a line to open the country.</p>
       {w.items.length > 0 && (
         <ul className="space-y-2">
           {w.items.map((i, k) => (
@@ -233,14 +235,6 @@ export default function TodayView() {
         <aside className="space-y-4">
           <WhatChanged w={data.what_changed} />
           <CouldStartSoon ew={data.could_start_soon} />
-          <details className="rounded-2xl border border-line bg-surface p-4 text-sm">
-            <summary className="cursor-pointer font-medium">How to read this page</summary>
-            <dl className="mt-2 space-y-2 text-xs text-ink2">
-              <div><dt className="font-medium text-ink">Severity</dt><dd>{data.how_to_read.severity}</dd></div>
-              <div><dt className="font-medium text-ink">Trend</dt><dd>{data.how_to_read.trend}</dd></div>
-              <div><dt className="font-medium text-ink">Confirmed</dt><dd>{data.how_to_read.confirmed}</dd></div>
-            </dl>
-          </details>
         </aside>
       </div>
     </div>
