@@ -1,5 +1,9 @@
 # Enriched conflict model — results (2026-11-19)
 
+> **Superseded.** The conflict-onset model described here has been removed and replaced by the escalation models
+> ("could this country get worse in the next 3 / 6 months?"), see [escalation-model.md](escalation-model.md). The
+> enrichment experiments below are kept for reference.
+
 ## What changed
 The training table went from **16 columns** (UCDP fighting history only, 124 countries) to **102 columns** for
 **176 countries** (every V-Dem country, not only countries that ever appear in UCDP): 77,957 country-months,

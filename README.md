@@ -57,13 +57,17 @@ News volume alone can therefore never make a country Critical.
 and **Change password**. A changed password is stored only as a hash in the database and replaces the `.env` value;
 changing it signs out other sessions. Settings changes always need this sign-in.
 
-## Early warning (experimental ML)
-A separate **model service** ([`model-service/`](model-service)) serves a model that ranks countries without recent
-conflict by their risk of a **new** conflict (≥ 25 deaths within 3 months) over the next window. It's trained on UCDP
-history plus neighbours, politics, economy and news trends; out-of-time ROC-AUC is 0.89, and 7 in 10 new conflicts
-(2013–2025) were in its monthly top 20. Predictions run monthly and are stored, then shown on the **Early warning**
-page, the homepage, country pages and crisis pages (spillover). Details:
-[`docs/ml-enrichment-results.md`](docs/ml-enrichment-results.md).
+## Early warning (ML): "could this country get worse?"
+A separate **model service** ([`model-service/`](model-service)) serves two models, `crisis_escalation_3m` and
+`crisis_escalation_6m`. They estimate, for every country, the risk of moving **up at least one severity level** (the
+site's levels, by deaths from organised violence per year: <100 Low, 100+ Moderate, 1,000+ High, 10,000+ Critical) in
+the next 3 or 6 months. For a calm country that is a new crisis; for a country in crisis, escalation. Countries
+already at Critical are not scored. Trained on UCDP history (all violence types) plus each country's recent trend,
+neighbours, politics, economy and news (including the "violent news vs normal" signal). Tested on 2013–2025 with
+models that never saw the test year: ROC-AUC 0.91 (3 months) / 0.90 (6 months), and 68% / 64% of the countries that
+got worse were in the monthly top 20; simple rules (recent trend of deaths, violent news) score ~0.52–0.54.
+Predictions run monthly and appear on the **Early warning** page, on every country card ("Risk of getting worse"),
+on country pages and in the spillover list. Details: [`docs/escalation-model.md`](docs/escalation-model.md).
 
 **It sets itself up.** The trained model ships with the model service. On first start the background worker
 imports UCDP history, downloads the country factors (World Bank, V-Dem, EPR, prices) and the last two years of the
@@ -86,7 +90,7 @@ docker compose exec api python -m app.cli backfill-news-history --start 1988 --e
 ```
 
 ```bash
-docker compose exec api python -m app.cli train-onset-model
+docker compose exec api python -m app.cli train-escalation-models
 ```
 
 ```bash

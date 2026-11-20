@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { LevelChip, monthRange, type Prediction } from "@/components/EarlyWarning";
+import { LEVEL_META, LevelChip, monthRange, type Level, type Prediction } from "@/components/EarlyWarning";
 import { ErrorBox, Loading } from "@/components/ui";
 import { useApi } from "@/lib/api";
 
@@ -23,6 +23,8 @@ export type CountryStory = {
   trend: Story["trend"]; reasons: string[]; confidence: Story["confidence"]; deaths_12m: number | null; violent_24h: number;
   activity: Story["activity"]; situations: { id: number; headline: string; severity: Story["severity"] }[];
   also_involved: { iso3: string; name: string }[];
+  outlook?: null | { status: string; level: Level | null; times_average: number | null; window: { start: string; end: string };
+    six_months: null | { level: Level | null; times_average: number | null; window: { start: string; end: string } } };
 };
 type Today = {
   generated_at: string;
@@ -85,6 +87,20 @@ export function ActivityBars({ data, height = 28 }: { data: Story["activity"]; h
   );
 }
 
+/* The model's outlook on a country card: risk of moving up a severity level in the next 3 and 6 months. */
+function Outlook({ o }: { o: CountryStory["outlook"] }) {
+  if (!o) return null;
+  if (o.status === "top_tier") return <p className="text-xs text-muted">Already at the highest severity level.</p>;
+  if (!o.level) return null;
+  const word = (l: Level | null) => (l ? LEVEL_META[l].label.toLowerCase() : "unknown");
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-raised px-2.5 py-1.5 text-xs ring-1 ring-inset ring-line">
+      <span className="text-muted">Risk of getting worse · next 3 months</span><LevelChip level={o.level} />
+      {o.six_months?.level && <span className="text-muted">· 6 months: {word(o.six_months.level)}</span>}
+    </div>
+  );
+}
+
 export function CountryCard({ c }: { c: CountryStory }) {
   return (
     <Link href={`/geopolitics/countries/${c.iso3}`}
@@ -101,6 +117,7 @@ export function CountryCard({ c }: { c: CountryStory }) {
       <ul className="space-y-1 text-sm text-ink2">
         {c.reasons.map((r) => <li key={r} className="flex gap-2"><span aria-hidden className="mt-2 h-1 w-1 shrink-0 rounded-full bg-muted" />{r}</li>)}
       </ul>
+      <Outlook o={c.outlook} />
       {c.also_involved.length > 0 && (
         <p className="text-xs text-muted">
           also involves {c.also_involved.slice(0, 3).map((x) => x.name).join(", ")}{c.also_involved.length > 3 ? ` +${c.also_involved.length - 3}` : ""}
@@ -126,7 +143,7 @@ function SummaryLine({ t }: { t: Today }) {
     [s.serious, "serious", "text-serious"],
     [s.getting_worse, "getting worse", "text-crit"],
     [s.calming, "calming down", "text-good"],
-    [s.countries_at_risk, "countries at risk of a new conflict", "text-accent"],
+    [s.countries_at_risk, "countries that could get worse soon", "text-accent"],
   ];
   return (
     <div className="flex flex-wrap gap-2">
@@ -163,17 +180,17 @@ function WhatChanged({ w }: { w: Today["what_changed"] }) {
 function CouldStartSoon({ ew }: { ew: Today["could_start_soon"] }) {
   if (!ew) return (
     <section className="rounded-2xl border border-line bg-surface p-4">
-      <h2 className="font-semibold">Could a new conflict start?</h2>
+      <h2 className="font-semibold">Could get worse soon</h2>
       <p className="mt-1 text-sm text-muted">The early-warning model is being set up. <Link className="link" href="/early-warning">See progress</Link></p>
     </section>
   );
   return (
     <section className="rounded-2xl border border-line bg-surface p-4">
       <div className="mb-1 flex items-baseline justify-between gap-2">
-        <h2 className="font-semibold">Could a new conflict start?</h2>
+        <h2 className="font-semibold">Could get worse soon</h2>
         <Link href="/early-warning" className="link text-xs">All countries →</Link>
       </div>
-      <p className="mb-3 text-xs text-muted">Peaceful countries with the highest risk of new fighting, {monthRange(ew.window)}. Even these usually stay peaceful.</p>
+      <p className="mb-3 text-xs text-muted">Countries most at risk of moving up a severity level, {monthRange(ew.window)}: a new crisis in a calm country, or escalation. Even these usually stay as they are.</p>
       <ol className="space-y-2">
         {ew.items.map((p) => (
           <li key={p.iso3}>

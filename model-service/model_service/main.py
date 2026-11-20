@@ -115,7 +115,7 @@ def _startup() -> None:
 
 
 class PredictRequest(BaseModel):
-    model: str = "conflict_onset"
+    model: str = "crisis_escalation_3m"
     rows: list[dict] = Field(..., min_length=1, max_length=5000, description="Factor values keyed by feature name; "
                              "an optional 'id' key is echoed back")
     explain: bool = False

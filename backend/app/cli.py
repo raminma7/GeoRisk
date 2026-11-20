@@ -11,8 +11,8 @@
     python -m app.cli backfill-news-history --start 1988 --end 2025   # GDELT 1.0 archive -> country-month news
     python -m app.cli setup-early-warning                            # first-time setup (also automatic in Docker)
     python -m app.cli download-factors [--refresh]                   # World Bank, V-Dem, EPR, prices
-    python -m app.cli train-onset-model                              # clean labels -> model package
-    python -m app.cli predict-onsets                                 # model service -> ml_predictions
+    python -m app.cli train-escalation-models                        # 3- and 6-month models -> model packages
+    python -m app.cli predict                                        # model service -> ml_predictions
     python -m app.cli labels [--horizon 1] [--start 2010-01-01]
     python -m app.cli train-baseline
     python -m app.cli analyze-crisis CRISIS_ID
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.core.db import session_scope
 from app.core.logging import configure_logging, get_logger
@@ -32,7 +32,7 @@ log = get_logger("cli")
 
 def _dt(s: str) -> datetime:
     d = datetime.fromisoformat(s)
-    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    return d if d.tzinfo else d.replace(tzinfo=UTC)
 
 
 def cmd_seed(_args) -> dict:
@@ -116,15 +116,16 @@ def cmd_backfill_news_history(args) -> dict:
     return backfill(args.start, args.end, workers=args.workers, max_files=args.max_files)
 
 
-def cmd_train_onset_model(args) -> dict:
-    from app.ml.onset_model import train_and_export
+def cmd_train_escalation_models(_args) -> dict:
+    from app.ml.escalation import train_and_export
 
     with session_scope() as s:
-        r = train_and_export(s, variant=args.variant)
-    return {k: v for k, v in r.items() if k != "results"} | {"test": r["results"][r["variant"]]}
+        r = train_and_export(s)
+    return {k: {"version": v["version"], "path": v["path"], "test": v["test"]["model"],
+                "by_current_tier": v["test"]["model_by_current_tier"]} for k, v in r.items()}
 
 
-def cmd_predict_onsets(_args) -> dict:
+def cmd_predict(_args) -> dict:
     from app.ml.predictions import run_predictions
 
     with session_scope() as s:
@@ -202,10 +203,9 @@ def main() -> None:
     x.add_argument("--workers", type=int, default=4)
     x.add_argument("--max-files", type=int, default=None)
     x.set_defaults(fn=cmd_backfill_news_history)
-    x = sub.add_parser("train-onset-model")
-    x.add_argument("--variant", default=None)
-    x.set_defaults(fn=cmd_train_onset_model)
-    sub.add_parser("predict-onsets").set_defaults(fn=cmd_predict_onsets)
+    sub.add_parser("train-escalation-models").set_defaults(fn=cmd_train_escalation_models)
+    sub.add_parser("predict").set_defaults(fn=cmd_predict)
+    sub.add_parser("predict-onsets").set_defaults(fn=cmd_predict)  # old name, kept so existing instructions work
     x = sub.add_parser("download-factors")
     x.add_argument("--refresh", action="store_true")
     x.set_defaults(fn=cmd_download_factors)

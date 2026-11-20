@@ -1,0 +1,212 @@
+{
+  "name": "crisis_escalation_3m",
+  "version": "v20261120-666a3054",
+  "trained_at": "2026-11-20T15:24:32.567312+00:00",
+  "horizon_months": 3,
+  "features": [
+    "sb_events_l1",
+    "sb_events_l3",
+    "sb_events_l6",
+    "sb_events_l12",
+    "sb_deaths_l1",
+    "sb_deaths_l3",
+    "sb_deaths_l12",
+    "ns_events_l3",
+    "os_events_l3",
+    "interstate_l12",
+    "months_since_sb",
+    "sb_active_months_l12",
+    "nb_count",
+    "nb_sb_events_l1",
+    "nb_sb_events_l12",
+    "nb_sb_deaths_l12",
+    "nb_countries_in_conflict_l12",
+    "region_sb_events_l12",
+    "region_countries_in_conflict_l12",
+    "vdem_electoral_democracy",
+    "vdem_liberal_democracy",
+    "vdem_regime_type",
+    "vdem_electoral_democracy_change",
+    "epr_excluded_pop_share",
+    "epr_excluded_groups",
+    "epr_relevant_groups",
+    "wdi_log_gdp_per_capita",
+    "wdi_gdp_growth_pct",
+    "wdi_inflation_pct",
+    "wdi_log_population",
+    "wdi_pop_age_0_14_pct",
+    "wdi_natural_resource_rents_pct_gdp",
+    "wdi_unemployment_pct",
+    "news_violent_share_chg_6m",
+    "news_threat_share_chg_6m",
+    "news_avg_tone_chg_3m",
+    "news_avg_goldstein_chg_3m",
+    "news_coverage_change_3m",
+    "news_violent_share",
+    "nb_sb_events_l1_chg_6m",
+    "wdi_log_gdp_per_capita_chg_12m",
+    "vdem_liberal_democracy_chg_12m",
+    "epr_excluded_pop_share_chg_12m",
+    "all_deaths_l1",
+    "all_deaths_l3",
+    "all_deaths_l12",
+    "tier_now",
+    "deaths_trend_3v9",
+    "ns_events_l12",
+    "os_events_l12",
+    "news_violent_vs_normal",
+    "news_protest_share",
+    "news_diplomatic_tension_share"
+  ],
+  "label": "worse_3m",
+  "label_definition": "Deaths from organised violence (UCDP, all types) in the next 3 months, scaled to a year, put the country at least one severity tier above its tier over the previous 12 months (tiers: <100, 100-999, 1,000-9,999, 10,000+ deaths per year). Countries already at the top tier are excluded.",
+  "applies_to": "Every country except those already at the top tier (10,000+ deaths a year)",
+  "prediction_window": "the 3 months after the data ends",
+  "training_rows": 76991,
+  "training_positives": 2549,
+  "base_rate": 0.033107765842760845,
+  "algorithm": "lightgbm (depth-3, regularised) + Platt calibration on out-of-time scores",
+  "data_checksum": "666a30545ee0816c8ffae1c8ee15d522563f5520389e334bb51ad162a1aba500",
+  "provenance": {
+    "ucdp_official": "26.1",
+    "ucdp_candidate": "candidate-v26_01_26_09",
+    "data_through": "2026-09"
+  },
+  "random_seed": 20261119,
+  "test": {
+    "years": [
+      2013,
+      2025
+    ],
+    "model": {
+      "n": 27156,
+      "positives": 857,
+      "base_rate": 0.0316,
+      "roc_auc": 0.908,
+      "pr_auc": 0.269,
+      "top20_caught": 0.678
+    },
+    "rule_deaths_trend": {
+      "n": 27156,
+      "positives": 857,
+      "base_rate": 0.0316,
+      "roc_auc": 0.517,
+      "pr_auc": 0.084,
+      "top20_caught": 0.408
+    },
+    "rule_violent_news": {
+      "n": 27156,
+      "positives": 857,
+      "base_rate": 0.0316,
+      "roc_auc": 0.543,
+      "pr_auc": 0.036,
+      "top20_caught": 0.147
+    },
+    "model_by_current_tier": {
+      "low": {
+        "n": 22838,
+        "positives": 481,
+        "base_rate": 0.0211,
+        "roc_auc": 0.922,
+        "pr_auc": 0.245
+      },
+      "elevated": {
+        "n": 2642,
+        "positives": 288,
+        "base_rate": 0.109,
+        "roc_auc": 0.776,
+        "pr_auc": 0.345
+      },
+      "high": {
+        "n": 1676,
+        "positives": 88,
+        "base_rate": 0.0525,
+        "roc_auc": 0.801,
+        "pr_auc": 0.191
+      }
+    }
+  },
+  "top_features": [
+    [
+      "all_deaths_l12",
+      0.5282
+    ],
+    [
+      "all_deaths_l3",
+      0.0824
+    ],
+    [
+      "all_deaths_l1",
+      0.0609
+    ],
+    [
+      "wdi_pop_age_0_14_pct",
+      0.0289
+    ],
+    [
+      "wdi_log_population",
+      0.024
+    ],
+    [
+      "deaths_trend_3v9",
+      0.0224
+    ],
+    [
+      "wdi_inflation_pct",
+      0.0202
+    ],
+    [
+      "tier_now",
+      0.0185
+    ],
+    [
+      "news_violent_share",
+      0.0176
+    ],
+    [
+      "wdi_log_gdp_per_capita",
+      0.0156
+    ],
+    [
+      "wdi_natural_resource_rents_pct_gdp",
+      0.0136
+    ],
+    [
+      "wdi_unemployment_pct",
+      0.0132
+    ],
+    [
+      "months_since_sb",
+      0.011
+    ],
+    [
+      "vdem_liberal_democracy",
+      0.0109
+    ],
+    [
+      "sb_deaths_l12",
+      0.0107
+    ],
+    [
+      "epr_excluded_pop_share",
+      0.0082
+    ],
+    [
+      "vdem_electoral_democracy",
+      0.0076
+    ],
+    [
+      "vdem_electoral_democracy_change",
+      0.0074
+    ],
+    [
+      "epr_relevant_groups",
+      0.0068
+    ],
+    [
+      "news_coverage_change_3m",
+      0.0067
+    ]
+  ],
+  "disclaimer": "Research estimate based on historical patterns, not a forecast of events."
+}

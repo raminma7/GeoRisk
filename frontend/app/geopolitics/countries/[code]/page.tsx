@@ -1,7 +1,7 @@
 "use client";
 
 /* "Crisis in <country>": how serious, why, what happened recently, where, and the model's
-   risk of a new conflict. */
+   risk of getting worse in the next 3 and 6 months. */
 
 import dynamic from "next/dynamic";
 import Link from "next/link";

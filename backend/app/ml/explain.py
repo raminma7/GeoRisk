@@ -50,7 +50,18 @@ LABELS: dict[str, tuple[str, str]] = {
     "wdi_log_gdp_per_capita_chg_12m": ("Change in income per person (1 year)", "pct_log"),
     "vdem_liberal_democracy_chg_12m": ("Change in liberal democracy (1 year)", "signed_score"),
     "epr_excluded_pop_share_chg_12m": ("Change in ethnic exclusion (1 year)", "pp_share"),
+    "all_deaths_l1": ("Deaths from organised violence last month", "int"),
+    "all_deaths_l3": ("Deaths from organised violence, last 3 months", "int"),
+    "all_deaths_l12": ("Deaths from organised violence, last 12 months", "int"),
+    "tier_now": ("Current severity", "tier"),
+    "deaths_trend_3v9": ("Deaths lately vs before (3 vs 9 months)", "ratio"),
+    "ns_events_l12": ("Clashes between armed groups (12 months)", "int"),
+    "os_events_l12": ("Attacks on civilians (12 months)", "int"),
+    "news_violent_vs_normal": ("Violent news vs this country's normal", "ratio"),
+    "news_protest_share": ("Share of protest news", "pct_share"),
+    "news_diplomatic_tension_share": ("Share of diplomatic-tension news", "pct_share"),
 }
+TIERS = {0: "Low", 1: "Moderate", 2: "High", 3: "Critical"}
 REGIMES = {0: "Closed autocracy", 1: "Electoral autocracy", 2: "Electoral democracy", 3: "Liberal democracy"}
 
 
@@ -68,6 +79,10 @@ def format_value(feature: str, v: float | None) -> str:
         return f"{v:.2f} of 1"
     if kind == "signed_score":
         return f"{v:+.2f}"
+    if kind == "tier":
+        return TIERS.get(round(v), str(v))
+    if kind == "ratio":
+        return f"{v:.1f}×"
     if kind == "regime":
         return REGIMES.get(int(round(v)), str(v))
     if kind == "pct":

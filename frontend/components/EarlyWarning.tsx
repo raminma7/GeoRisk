@@ -8,7 +8,10 @@ import Link from "next/link";
 
 export type Reason = { factor: string; label: string; value: string; direction: "raises" | "lowers"; weight: number };
 export type Prediction = {
-  iso3: string; name: string | null; status: "predicted" | "ongoing_conflict"; probability: number | null; rank: number | null;
+  iso3: string; name: string | null; status: "predicted" | "top_tier"; probability: number | null; rank: number | null;
+  current_tier?: string | null;
+  six_months?: { probability: number | null; times_average: number | null; level: Level | null; status: string;
+    window: { start: string; end: string } } | null;
   out_of: number | null; times_average: number | null; level: Level | null; reasons: Reason[];
   window: { start: string; end: string }; data_through: string; model_version: string; region?: string | null;
   borders?: string[];
@@ -150,11 +153,13 @@ export function Sparkline({ points }: { points: { window_start: string; times_av
 export function ExperimentalBadge() {
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent ring-1 ring-inset ring-accent/25"
-      title="Statistical model trained on historical data. Research estimate, not a forecast of war.">
+      title="Statistical model trained on historical data. Research estimate, not a forecast of events.">
       <span aria-hidden>⚗</span> Experimental model
     </span>
   );
 }
+
+export const TIER_LABEL: Record<string, string> = { low: "Low", elevated: "Moderate", high: "High", critical: "Critical" };
 
 export function CountryRiskRow({ p, max, maxReasons = 3 }: { p: Prediction; max: number; maxReasons?: number }) {
   return (
@@ -163,7 +168,8 @@ export function CountryRiskRow({ p, max, maxReasons = 3 }: { p: Prediction; max:
       <div className="row-span-2 text-lg font-semibold tabular-nums text-muted md:row-span-1">#{p.rank}</div>
       <div className="min-w-0">
         <div className="truncate font-medium group-hover:text-accent">{p.name || p.iso3}</div>
-        <div className="truncate text-xs text-muted">{p.region || p.iso3}</div>
+        <div className="truncate text-xs text-muted">{p.current_tier ? `Now: ${TIER_LABEL[p.current_tier] || p.current_tier}` : p.region || p.iso3}
+          {p.six_months?.times_average != null && <> · 6 months: {p.six_months.times_average.toFixed(1)}×</>}</div>
       </div>
       <div className="col-start-2 min-w-0 md:col-start-auto"><ReasonList reasons={p.reasons} max={maxReasons} compact /></div>
       <div className="col-start-2 flex items-center gap-3 md:col-start-auto md:flex-col md:items-end md:gap-1.5">
@@ -178,19 +184,19 @@ export function CountryRiskRow({ p, max, maxReasons = 3 }: { p: Prediction; max:
 export function CountryRiskCard({ risk }: { risk: (Prediction & { history: { window_start: string; times_average: number | null }[];
   explainer: { caveat: string } }) | null }) {
   if (!risk) return null;
-  if (risk.status === "ongoing_conflict") {
+  if (risk.status === "top_tier") {
     return (
       <section className="rounded-2xl border border-line bg-surface p-5">
-        <div className="flex flex-wrap items-center gap-2"><h2 className="h2">Early warning</h2><ExperimentalBadge /></div>
-        <p className="mt-2 text-sm text-ink2">This country already has recent conflict deaths, so the new-conflict model does not apply.
-          Its situation is tracked by live crisis monitoring above.</p>
+        <div className="flex flex-wrap items-center gap-2"><h2 className="h2">Could it get worse?</h2><ExperimentalBadge /></div>
+        <p className="mt-2 text-sm text-ink2">This country is already at the highest severity level (10,000+ deaths a year), so the
+          model does not score it. Its situation is tracked by live monitoring above.</p>
       </section>
     );
   }
   return (
     <section className="rounded-2xl border border-line bg-surface p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2"><h2 className="h2">Early warning · risk of new conflict</h2><ExperimentalBadge /></div>
+        <div className="flex flex-wrap items-center gap-2"><h2 className="h2">Could it get worse?</h2><ExperimentalBadge /></div>
         <Link href="/early-warning" className="link text-xs">Compare all countries →</Link>
       </div>
       <div className="mt-4 grid gap-6 md:grid-cols-[220px_1fr]">
@@ -198,7 +204,14 @@ export function CountryRiskCard({ risk }: { risk: (Prediction & { history: { win
           <RiskGauge value={risk.times_average || 0} level={risk.level} />
           <TimesAverage value={risk.times_average} big />
           <div className="mt-1 flex items-center gap-2"><LevelChip level={risk.level} size="md" /></div>
-          <div className="mt-2 text-xs text-muted">Rank #{risk.rank} of {risk.out_of} quiet countries · {monthRange(risk.window)}</div>
+          <div className="mt-2 text-xs text-muted">Risk of moving up a severity level · {monthRange(risk.window)}</div>
+          <div className="text-xs text-muted">Rank #{risk.rank} of {risk.out_of} countries
+            {risk.current_tier && <> · now {TIER_LABEL[risk.current_tier] || risk.current_tier}</>}</div>
+          {risk.six_months?.times_average != null && (
+            <div className="mt-2 rounded-lg bg-raised px-3 py-1.5 text-xs ring-1 ring-inset ring-line">
+              Next 6 months: <b>{risk.six_months.times_average.toFixed(1)}×</b> average {risk.six_months.level && <LevelChip level={risk.six_months.level} />}
+            </div>
+          )}
         </div>
         <div className="space-y-4">
           <div>
@@ -218,11 +231,11 @@ export function CountryRiskCard({ risk }: { risk: (Prediction & { history: { win
 
 export function SpilloverCard({ items }: { items: Prediction[] }) {
   const shown = items.filter((p) => p.status === "predicted").slice(0, 6);
-  const inConflict = items.filter((p) => p.status === "ongoing_conflict");
+  const inConflict = items.filter((p) => p.status === "top_tier");
   return (
     <section className="rounded-2xl border border-line bg-surface p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2"><h2 className="h2">Spillover risk</h2><ExperimentalBadge /></div>
-      <p className="mb-3 text-xs text-muted">Neighbouring countries not involved in this crisis, by modelled risk of a new conflict.</p>
+      <p className="mb-3 text-xs text-muted">Neighbouring countries not involved in this crisis, by modelled risk of getting worse in the next 3 months.</p>
       {shown.length === 0 ? <p className="text-sm text-muted">No uninvolved neighbours with a prediction.</p> : (
         <ul className="space-y-2">
           {shown.map((p) => (
@@ -238,7 +251,7 @@ export function SpilloverCard({ items }: { items: Prediction[] }) {
           ))}
         </ul>
       )}
-      {inConflict.length > 0 && <p className="mt-3 text-[11px] text-muted">Also bordering, already in conflict: {inConflict.map((p) => p.name).join(", ")}</p>}
+      {inConflict.length > 0 && <p className="mt-3 text-[11px] text-muted">Also bordering, already Critical: {inConflict.map((p) => p.name).join(", ")}</p>}
     </section>
   );
 }

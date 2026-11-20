@@ -98,8 +98,9 @@ def _early_warning(s: Session) -> dict | None:
     if not lw:
         return None
     rows = s.execute(select(MlPrediction, Country.name).join(Country, Country.iso3 == MlPrediction.iso3)
-                     .where(MlPrediction.model_version == lw[0], MlPrediction.window_start == lw[1],
-                            MlPrediction.status == "predicted").order_by(MlPrediction.rank).limit(5)).all()
+                     .where(MlPrediction.model_name == P.MODEL, MlPrediction.model_version == lw[0],
+                            MlPrediction.window_start == lw[1], MlPrediction.status == "predicted")
+                     .order_by(MlPrediction.rank).limit(5)).all()
     meta = _meta(s)
     return {"window": meta["window"], "data_through": meta["data_through"], "model_version": lw[0],
             "items": [P.ser(p, n) for p, n in rows]}
@@ -144,6 +145,28 @@ def overview(s: Session = Depends(get_db), _: Principal = Depends(require_read))
     }
 
 
+def _attach_outlook(s: Session, countries: list[dict]) -> None:
+    """Each country card gets the model's 'could get worse' outlook for the next 3 and 6 months (if predicted)."""
+    from app.api.v1.predictions import six_months
+    from app.ml import predictions as P
+    from app.ml.models import MlPrediction
+
+    lw = P.latest_window(s)
+    if not lw:
+        return
+    three = {p.iso3: p for p in s.scalars(select(MlPrediction).where(
+        MlPrediction.model_name == P.MODEL, MlPrediction.model_version == lw[0], MlPrediction.window_start == lw[1]))}
+    six = six_months(s)
+    for c in countries:
+        p3, p6 = three.get(c["iso3"]), six.get(c["iso3"])
+        c["outlook"] = None if p3 is None else {
+            "status": p3.status, "level": p3.level, "times_average": p3.times_average,
+            "window": {"start": iso(p3.window_start), "end": iso(p3.window_end)},
+            "six_months": None if p6 is None else {"level": p6.level, "times_average": p6.times_average,
+                                                   "window": {"start": iso(p6.window_start), "end": iso(p6.window_end)}},
+        }
+
+
 @router.get("/today", summary="Plain-language overview for non-specialists: situations, severity, reasons, changes")
 def today(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     from app.monitoring import plain
@@ -151,6 +174,7 @@ def today(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     now = utcnow()
     sts = plain.active_stories(s, now)
     cs = plain.country_stories(s, sts, now)
+    _attach_outlook(s, cs)
     main = [x for x in cs if x["group"] == "main"]
     other = [x for x in cs if x["group"] == "other"]
     ew = _early_warning(s)

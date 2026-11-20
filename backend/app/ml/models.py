@@ -109,7 +109,8 @@ class MlPrediction(Base):
     window_start: Mapped[date] = mapped_column(Date)
     window_end: Mapped[date] = mapped_column(Date)
     data_through: Mapped[date] = mapped_column(Date)
-    status: Mapped[str] = mapped_column(String(30))  # predicted | ongoing_conflict
+    status: Mapped[str] = mapped_column(String(30))  # predicted | top_tier (already Critical)
+    current_tier: Mapped[str | None] = mapped_column(String(20))  # low | elevated | high | critical (when predicted)
     probability: Mapped[float | None] = mapped_column(Float)
     raw_score: Mapped[float | None] = mapped_column(Float)
     rank: Mapped[int | None] = mapped_column(Integer)

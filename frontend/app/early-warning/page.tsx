@@ -16,11 +16,13 @@ const WorldMap = dynamic(() => import("@/components/WorldMap"), { ssr: false, lo
 type WatchList = {
   meta: null | {
     model_version: string; window: { start: string; end: string }; data_through: string; generated_at: string; trained_at?: string;
-    test_quality: null | { roc_auc: number; top20_share_caught: number; test_years: number[]; onsets_tested: number };
+    test_quality: null | { roc_auc: number; top20_share_caught: number; test_years: number[]; cases_tested: number;
+      simple_rule_roc_auc: number | null };
+    window_6m?: { start: string; end: string } | null;
     levels: Partial<Record<Level, number>>;
     explainer: { question: string; how: string; levels: Record<string, string>; caveat: string };
   };
-  items: Prediction[]; ongoing_conflict: { iso3: string; name: string }[]; total_predicted: number; message?: string;
+  items: Prediction[]; already_critical: { iso3: string; name: string }[]; total_predicted: number; message?: string;
   setup?: null | { state: "running" | "failed" | "done"; step?: string | null; step_label?: string | null; error?: string | null;
     progress?: null | { done: number; total: number | null }; updated_at?: string };
   setup_steps?: { id: string; label: string }[];
@@ -81,7 +83,8 @@ export default function EarlyWarningPage() {
   const [level, setLevel] = useState<"" | Level>("");
   const [showAll, setShowAll] = useState(false);
   const [region, setRegion] = useState("");
-  const { data, error, isLoading, mutate } = useApi<WatchList>(`/api/v1/predictions${qs({ limit: 300, region })}`,
+  const [group, setGroup] = useState<"" | "calm" | "crisis">("");
+  const { data, error, isLoading, mutate } = useApi<WatchList>(`/api/v1/predictions${qs({ limit: 300, region, group })}`,
     { refreshInterval: (d?: WatchList) => (d && !d.meta ? 10_000 : 0) });
   const regions = useApi<{ items: { code: string; name: string }[] }>("/api/v1/regions?kind=un_subregion");
   const countries = useApi<{ items: { iso3: string; iso_numeric: number | null }[] }>("/api/v1/countries?limit=500");
@@ -97,7 +100,7 @@ export default function EarlyWarningPage() {
       t[k] = `${p.name}: ${p.times_average?.toFixed(1)}× average · ${p.level ? LEVEL_META[p.level].label : ""} (#${p.rank})`;
       back[k] = p.iso3;
     }
-    for (const o of data?.ongoing_conflict || []) {
+    for (const o of data?.already_critical || []) {
       const n = num.get(o.iso3);
       if (!n) continue;
       const k = String(n).padStart(3, "0");
@@ -127,10 +130,11 @@ export default function EarlyWarningPage() {
           <div className="max-w-2xl">
             <div className="mb-3 flex flex-wrap items-center gap-2"><ExperimentalBadge />
               <span className="text-xs text-muted">Updated {fmtDate(m.generated_at, false)} </span></div>
-            <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Where could a new conflict start?</h1>
+            <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Where could things get worse?</h1>
             <p className="mt-2 text-ink2">
-              Countries ranked by their modelled risk of a <b>new</b> armed conflict in <b>{monthRange(m.window)}</b> —
-              among countries that have had no conflict deaths for two years.
+              Countries ranked by their modelled risk of moving <b>up at least one severity level</b> in <b>{monthRange(m.window)}</b>:
+              a new crisis in a calm country, or escalation where there already is one.
+              {m.window_6m && <> A second model looks further ahead, to {monthRange(m.window_6m)}.</>}
             </p>
             <p className="mt-1 text-sm text-muted">Based on verified conflict data through {monthLabel(m.data_through)}.</p>
           </div>
@@ -138,8 +142,8 @@ export default function EarlyWarningPage() {
             <div className="rounded-xl border border-line bg-raised p-4 text-sm">
               <div className="text-xs uppercase tracking-wide text-muted">Track record</div>
               <div className="mt-1 text-2xl font-semibold tabular-nums">{Math.round(q.top20_share_caught * 10)} in 10</div>
-              <div className="max-w-[15rem] text-xs text-muted">new conflicts in {q.test_years[0]}–{q.test_years[1]} were in the model’s
-                monthly top 20 (tested on years it had never seen)</div>
+              <div className="max-w-[15rem] text-xs text-muted">countries that got worse in {q.test_years[0]}–{q.test_years[1]} were in the
+                model’s monthly top 20 (tested on years it had never seen)</div>
             </div>
           )}
         </div>
@@ -154,9 +158,9 @@ export default function EarlyWarningPage() {
             </button>
           ))}
           <div className="rounded-xl border border-line bg-raised p-3">
-            <div className="flex items-center gap-2 text-xs text-muted"><span className="h-2 w-2 rounded-full" style={{ background: ONGOING_COLOR }} />Already in conflict</div>
-            <div className="mt-1 text-2xl font-semibold tabular-nums">{data.ongoing_conflict.length}</div>
-            <div className="text-xs text-muted">tracked by live monitoring instead</div>
+            <div className="flex items-center gap-2 text-xs text-muted"><span className="h-2 w-2 rounded-full" style={{ background: ONGOING_COLOR }} />Already Critical</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">{data.already_critical.length}</div>
+            <div className="text-xs text-muted">highest level; not scored</div>
           </div>
         </div>
       </section>
@@ -167,7 +171,7 @@ export default function EarlyWarningPage() {
           <h2 className="h2">Risk map</h2>
           <div className="flex flex-wrap items-center gap-3 text-xs text-ink2">
             {RISK_RAMP.map((r) => <span key={r.label} className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm" style={{ background: r.color }} />{r.label}</span>)}
-            <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm" style={{ background: ONGOING_COLOR }} />in conflict</span>
+            <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm" style={{ background: ONGOING_COLOR }} />already Critical</span>
           </div>
         </div>
         <WorldMap fills={fills} fillTitles={titles} height={380} onCountryClick={(id) => numToIso[id] && router.push(`/geopolitics/countries/${numToIso[id]}`)} />
@@ -176,7 +180,15 @@ export default function EarlyWarningPage() {
       {/* Ranked list */}
       <section className="rounded-2xl border border-line bg-surface p-2 md:p-4">
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2">
-          <h2 className="h2">{level ? `${LEVEL_META[level].label} risk` : "Watch list"} <span className="font-normal normal-case text-muted">· {items.length} countries</span></h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="h2">{level ? `${LEVEL_META[level].label} risk` : "Watch list"} <span className="font-normal normal-case text-muted">· {items.length} countries</span></h2>
+            <div className="inline-flex rounded-lg border border-line p-0.5 text-xs" role="tablist" aria-label="Which countries">
+              {([["", "All"], ["calm", "Calm now · new crisis?"], ["crisis", "In crisis · escalation?"]] as const).map(([v, l]) => (
+                <button key={v} role="tab" aria-selected={group === v} onClick={() => setGroup(v)}
+                  className={`rounded-md px-2.5 py-1 ${group === v ? "bg-accent/10 text-accent" : "text-ink2 hover:text-ink"}`}>{l}</button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             {level && <button className="btn text-xs" onClick={() => setLevel("")}>Clear filter ✕</button>}
             <select className="input text-xs" value={region} onChange={(e) => setRegion(e.target.value)} aria-label="Region">
@@ -206,7 +218,7 @@ export default function EarlyWarningPage() {
         </div>
         <div className="rounded-2xl border border-line bg-surface p-5">
           <h3 className="font-medium">How does it work?</h3>
-          <p className="mt-1 text-sm text-ink2">{m.explainer.how} “×N average” compares each country with the average quiet country.</p>
+          <p className="mt-1 text-sm text-ink2">{m.explainer.how} “×N average” compares each country with the average country.</p>
         </div>
         <div className="rounded-2xl border border-warn/40 bg-warn/5 p-5">
           <h3 className="font-medium">Read with care</h3>
@@ -215,10 +227,10 @@ export default function EarlyWarningPage() {
       </section>
 
       <details className="rounded-2xl border border-line bg-surface p-4">
-        <summary className="cursor-pointer text-sm font-medium">Countries already in active conflict ({data.ongoing_conflict.length})</summary>
-        <p className="mt-2 text-xs text-muted">The model only scores countries without recent conflict deaths. Ongoing conflicts are covered by live monitoring on the Overview.</p>
+        <summary className="cursor-pointer text-sm font-medium">Countries already at Critical ({data.already_critical.length})</summary>
+        <p className="mt-2 text-xs text-muted">These countries are already at the highest severity level (10,000+ deaths a year), so they cannot move up and are not scored. They are followed on the Today page.</p>
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {data.ongoing_conflict.map((c) => <Link key={c.iso3} href={`/geopolitics/countries/${c.iso3}`}
+          {data.already_critical.map((c) => <Link key={c.iso3} href={`/geopolitics/countries/${c.iso3}`}
             className="rounded-full bg-raised px-2.5 py-0.5 text-xs ring-1 ring-inset ring-line hover:ring-accent">{c.name}</Link>)}
         </div>
       </details>
