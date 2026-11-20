@@ -18,6 +18,7 @@ type Overview = {
   data_freshness: Record<string, { last_success_at: string | null; stale: boolean | null } | string | null>;
 };
 type TodayCountries = {
+  summary: { countries: number; by_level: Record<string, number>; violent_events_24h: number; countries_with_violence_24h: number };
   countries: { iso3: string; name: string; headline: string; severity: { level: string; label: string } }[];
   other_signals: { iso3: string; headline: string; severity: { level: string; label: string } }[];
 };
@@ -39,7 +40,7 @@ export default function GlobalOverview() {
   const [show, setShow] = useState<"violent" | "all">("violent");
   const [period, setPeriod] = useState("1");
   const [place, setPlace] = useState("");
-  const events = useApi<{ features: never[] }>(`/api/v1/events${qs({
+  const events = useApi<{ features: never[]; total?: number }>(`/api/v1/events${qs({
     view: "map", limit: 400, start: daysAgo(Number(period)), quad_class: show === "violent" ? 4 : undefined, located_in: place || undefined,
   })}`, { refreshInterval: 120_000 });
 
@@ -62,6 +63,8 @@ export default function GlobalOverview() {
   if (isLoading || !data) return <Loading what="overview" />;
   const fresh = data.data_freshness as Record<string, { last_success_at: string | null }> & { latest_event_available_at?: string };
   const nEvents = events.data?.features.length ?? 0;
+  const totalEvents = events.data?.total ?? nEvents;
+  const sm = today.data?.summary;
 
   return (
     <div className="space-y-5">
@@ -77,13 +80,16 @@ export default function GlobalOverview() {
         </div>
       </div>
 
+      {/* Same numbers as the map below: countries by colour, and the violent-event dots of the last 24 hours. */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Stat label="Active monitored crises" value={num(data.counts.active_crises)} />
-        <Stat label="New crises (48h)" value={num(data.counts.new_crises_48h)} />
-        <Stat label="Needing review" value={num(data.counts.crises_needing_review)} />
-        <Stat label="Events ingested (24h)" value={num(data.counts.events_24h)} hint={`${num(data.counts.event_clusters_24h)} deduplicated`} />
-        <Stat label="Countries with events (24h)" value={num(data.counts.countries_with_events_24h)} />
-        <Stat label="Open alerts" value={num(data.counts.open_alerts)} />
+        <Stat label="Countries in crisis" value={num(sm?.countries)} hint="coloured on the map" />
+        {(["critical", "high", "elevated"] as const).map((l) => (
+          <Stat key={l} value={num(sm?.by_level?.[l] ?? 0)} hint={`${l === "elevated" ? "moderate" : l} severity`}
+            label={<span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3 rounded-sm" style={{ background: SEVERITY_FILL[l] }} />
+              {{ critical: "Critical", high: "High", elevated: "Moderate" }[l]}</span>} />
+        ))}
+        <Stat label="Violent events (24h)" value={num(sm?.violent_events_24h)} hint="reported in the news, deduplicated" />
+        <Stat label="Countries with violence (24h)" value={num(sm?.countries_with_violence_24h)} hint="where those events happened" />
       </div>
 
       <Card title="Global event map" right={<span className="text-xs text-muted">Click a coloured country for details</span>}>
@@ -109,7 +115,8 @@ export default function GlobalOverview() {
           ))}
           <span className="inline-flex items-center gap-1.5"><span className="h-3 w-4 rounded-sm" style={{ background: OTHER_FILL }} />Local reports only</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: "var(--series-1)" }} />
-            Each dot = one {show === "violent" ? "violent " : ""}event reported in the news ({nEvents} shown, {PERIOD.find((p) => p[0] === period)?.[1].toLowerCase()})</span>
+            Each dot = one {show === "violent" ? "violent " : ""}event reported in the news · {PERIOD.find((p) => p[0] === period)?.[1].toLowerCase()}:{" "}
+            {totalEvents > nEvents ? `${num(nEvents)} most serious of ${num(totalEvents)} shown` : `${num(nEvents)} events`}</span>
         </div>
       </Card>
     </div>

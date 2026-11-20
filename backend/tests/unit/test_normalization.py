@@ -107,3 +107,13 @@ def test_cameo_severity_and_signals():
 def test_domain_and_name_helpers():
     assert domain_of("https://www.bbc.co.uk/news/x") == "bbc.co.uk"
     assert normalize_name("Côte d'Ivoire") == "cote d ivoire"
+
+
+def test_ucdp_gw_codes_for_yemen_and_serbia(engine):
+    """UCDP codes Yemen as GW 678 and Serbia as 345; both must resolve (Yemen's deaths were missing before)."""
+    from app.core.db import SessionLocal
+    from app.registry.service import RegistryResolver
+
+    with SessionLocal() as s:
+        r = RegistryResolver.load(s)
+        assert r.iso3(r.gw_country["678"]) == "YEM" and r.iso3(r.gw_country["345"]) == "SRB"

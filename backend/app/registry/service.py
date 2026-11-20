@@ -59,6 +59,8 @@ def seed_registry(session: Session) -> dict[str, int]:
         stats["regions"] += 1
         return r.id
 
+    UCDP_GW_EXTRA = {"678": "YEM", "345": "SRB"}
+
     def add_mapping(scheme: str, code: str, entity_type: str, entity_id: int, notes: str | None = None) -> None:
         stmt = insert(SourceCodeMapping).values(
             scheme=scheme, code=code, entity_type=entity_type, entity_id=entity_id, notes=notes
@@ -101,6 +103,11 @@ def seed_registry(session: Session) -> dict[str, int]:
                 add_mapping("fips", f, "country", country.id)
         if c["gw_code"]:
             add_mapping("gw", str(c["gw_code"]), "country", country.id)
+        # UCDP uses its own Gleditsch–Ward codes for two countries: Yemen 678 (unified Yemen keeps North Yemen's code;
+        # our registry's 680 is former South Yemen) and Serbia 345 (as successor of Yugoslavia).
+        for gw, iso3 in UCDP_GW_EXTRA.items():
+            if c["iso3"] == iso3:
+                add_mapping("gw", gw, "country", country.id, notes="UCDP Gleditsch-Ward code")
         for g in c["groups"]:
             grp = session.scalar(select(CountryGroup).where(CountryGroup.code == g))
             if not grp:

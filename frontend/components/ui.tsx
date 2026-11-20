@@ -68,7 +68,7 @@ export function Card({ title, right, children, className = "" }: { title?: React
   );
 }
 
-export function Stat({ label: l, value, hint }: { label: string; value: ReactNode; hint?: string }) {
+export function Stat({ label: l, value, hint }: { label: ReactNode; value: ReactNode; hint?: string }) {
   return (
     <div className="card">
       <div className="text-xs text-muted">{l}</div>

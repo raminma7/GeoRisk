@@ -104,6 +104,19 @@ def deaths_level(d: int) -> str:
     return "critical" if d >= 10_000 else "high" if d >= 1_000 else "elevated" if d >= 100 else "low"
 
 
+LEVELS = ["low", "elevated", "high", "critical"]
+
+
+def combined_level(news_level: str, deaths_lvl: str) -> str:
+    """Severity = verified deaths (UCDP, 12 months), raised by at most one step by today's news.
+
+    News volume alone cannot make a country Critical: big countries are always heavily reported. So a place with
+    no verified conflict deaths is at most Moderate, ~100+ deaths at most High, ~1,000+ deaths can reach Critical."""
+    base = LEVEL_RANK.get(deaths_lvl, 0)
+    news = LEVEL_RANK.get(news_level, 0)
+    return LEVELS[max(base, min(news, base + 1))]
+
+
 def confidence(ind: dict) -> dict:
     lbl = ind.get("evidence_confidence_label") or "low"
     src = ind.get("independent_sources_24h") or 0
@@ -200,7 +213,7 @@ def stories(s: Session, crises: list[Crisis], now: datetime | None = None, with_
         conf = confidence(c.current_indicators or {})
         trend = _trend(c, prev.get(c.id))
         d = sum(deaths.get(x, 0) for x in (c.location_country_iso3s or []))
-        level = max(c.priority_level, deaths_level(d) if kind == "conflict" else "low", key=lambda x: LEVEL_RANK.get(x, 0))
+        level = combined_level(c.priority_level, deaths_level(d) if kind == "conflict" else "low")
         main = kind != "domestic" and (conf["level"] != "low" or d >= 1000)
         countries = sorted(set(c.location_country_iso3s or []) | set(c.core_country_iso3s or []))
         out.append({
@@ -261,6 +274,15 @@ def _country_activity(s: Session, isos: list[str], now: datetime, days: int = 7)
     return {iso: [{"date": d.isoformat(), "violent": by.get(iso, {}).get(d, 0)} for d in dates] for iso in isos}
 
 
+def violence_totals(s: Session, now: datetime | None = None) -> dict:
+    """Violent events reported worldwide in the last 24h (deduplicated) and how many countries they happened in."""
+    now = now or utcnow()
+    n, countries = s.execute(text(
+        "SELECT count(*), count(DISTINCT action_country_iso3) FROM event_clusters WHERE kind = 'event' "
+        "AND quad_class = 4 AND last_seen_at >= :t"), {"t": now - timedelta(hours=24)}).one()
+    return {"violent_events_24h": n or 0, "countries_with_violence_24h": countries or 0}
+
+
 def country_stories(s: Session, sts: list[dict], now: datetime | None = None) -> list[dict]:
     """One card per country where crisis events are happening: "Crisis in <country>".
 
@@ -283,7 +305,9 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
         use = main_group or group
         name = names.get(iso, iso)
         d = deaths.get(iso, 0)
-        level = max([g["severity"]["level"] for g in use] + [deaths_level(d)], key=lambda x: LEVEL_RANK.get(x, 0))
+        # The country's own verified deaths, raised by at most one step by the busiest situation's news level.
+        news_now = max((g["news_level"] for g in use), key=lambda x: LEVEL_RANK.get(x, 0))
+        level = combined_level(news_now, deaths_level(d))
         trend = max((g["trend"]["code"] for g in use), key=lambda x: TREND_RANK[x])
         conf = max((g["confidence"] for g in use), key=lambda c: conf_rank.get(c["level"], 0))
         violent, disputes = counts.get(iso, (0, 0))
@@ -292,8 +316,8 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
         older = [g for g in use if g.get("level_yesterday")]
         yest = None
         if older:
-            yest = max([max(g["level_yesterday"], deaths_level(g.get("deaths_12m") or 0), key=lambda x: LEVEL_RANK.get(x, 0))
-                        for g in older] + [deaths_level(d)], key=lambda x: LEVEL_RANK.get(x, 0))
+            yest = combined_level(max((g["level_yesterday"] for g in older), key=lambda x: LEVEL_RANK.get(x, 0)),
+                                  deaths_level(d))
         rs: list[str] = []
         if d >= 25:
             rs.append(f"About {round_count(d)} people killed in organised violence here in the past 12 months (verified by UCDP)")
@@ -313,6 +337,7 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
             "trend": {"code": trend, "label": TREND[trend]}, "reasons": rs[:3], "confidence": conf,
             "group": "main" if main_group else "other", "deaths_12m": d or None,
             "violent_24h": violent, "activity": act.get(iso, []), "severity_yesterday": yest,
+            "disputes_24h": disputes,
             "situations": [{"id": g["id"], "headline": g["headline"], "severity": g["severity"]}
                            for g in sorted(use, key=sort_key)],
             "also_involved": [{"iso3": x, "name": names.get(x, x)} for x in involved],

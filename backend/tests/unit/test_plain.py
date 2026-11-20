@@ -79,3 +79,12 @@ def test_place_is_shortened():
     assert plain.short_place("Kyiv, Kyyiv, Misto, Ukraine", "Ukraine") == "Kyiv, Ukraine"
     assert plain.short_place("Bangladesh (general), Bangladesh", "Bangladesh") == "Bangladesh"
     assert plain.the("United States") == "the United States" and plain.the("Iran") == "Iran"
+
+
+def test_news_alone_cannot_make_a_country_critical():
+    # severity = verified deaths, raised by at most one step by today's news
+    assert plain.combined_level("critical", "low") == "elevated"      # e.g. United States, China: lots of news, no war
+    assert plain.combined_level("critical", "elevated") == "high"     # ~100+ deaths
+    assert plain.combined_level("critical", "high") == "critical"     # ~1,000+ deaths and heavy news
+    assert plain.combined_level("low", "critical") == "critical"      # a war stays critical on a quiet news day
+    assert plain.combined_level("elevated", "low") == "elevated"

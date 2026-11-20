@@ -160,7 +160,9 @@ def today(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
 
         lv = P.count_by_level(s, ew["model_version"], date.fromisoformat(ew["window"]["start"]))
         at_risk = (lv.get("very_high") or 0) + (lv.get("high") or 0)
-    summary = {"countries": len(main), "serious": sum(1 for x in main if x["severity"]["level"] in ("critical", "high")),
+    by_level = {lv: sum(1 for x in main if x["severity"]["level"] == lv) for lv in ("critical", "high", "elevated", "low")}
+    summary = {"countries": len(main), "serious": by_level["critical"] + by_level["high"], "by_level": by_level,
+               **plain.violence_totals(s, now),
                "getting_worse": sum(1 for x in main if x["trend"]["code"] == "up"),
                "calming": sum(1 for x in main if x["trend"]["code"] == "down"), "countries_at_risk": at_risk}
     return {
