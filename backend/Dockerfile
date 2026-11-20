@@ -6,6 +6,8 @@ COPY pyproject.toml ./
 COPY app ./app
 RUN pip install --upgrade pip && pip install ".[dev]"
 COPY . .
+# Windows checkouts may turn the script's line endings into CRLF, which breaks /bin/sh
+RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
 RUN useradd -m georisk && mkdir -p /data/exports /data/models /data/factors && chown -R georisk /data /app
 USER georisk
 EXPOSE 8000
