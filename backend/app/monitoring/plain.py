@@ -210,6 +210,7 @@ def stories(s: Session, crises: list[Crisis], now: datetime | None = None, with_
             "trend": {"code": trend, "label": TREND[trend]}, "reasons": reasons(c, kind, deaths, now), "confidence": conf,
             "group": "main" if main else "other",
             "countries": [{"iso3": x, "name": names.get(x, x)} for x in countries],
+            "locations": sorted(c.location_country_iso3s or []),
             "activity": act.get(c.id, []), "last_event_at": c.last_event_at.isoformat() if c.last_event_at else None,
             "level_yesterday": prev.get(c.id), "news_level": c.priority_level,
             # map marker fields
@@ -227,6 +228,89 @@ def sort_key(st: dict) -> tuple:
 def active_stories(s: Session, now: datetime | None = None) -> list[dict]:
     cs = list(s.scalars(select(Crisis).where(Crisis.status.in_(ACTIVE)).order_by(desc(Crisis.current_priority)).limit(120)))
     return sorted(stories(s, cs, now), key=sort_key)
+
+
+# ----------------------------------------------------------------- by country
+DISPUTE_ROOTS = ["10", "11", "12", "13", "16"]
+TREND_RANK = {"up": 2, "down": 1, "flat": 0}
+
+
+def _country_counts(s: Session, isos: list[str], now: datetime) -> dict[str, tuple[int, int]]:
+    """(violent reports, threats/disputes) in the last 24h by the country where they happened (deduplicated clusters)."""
+    if not isos:
+        return {}
+    rows = s.execute(text(
+        "SELECT action_country_iso3, count(*) FILTER (WHERE quad_class = 4), "
+        "count(*) FILTER (WHERE event_root_code = ANY(:dr)) FROM event_clusters "
+        "WHERE kind = 'event' AND action_country_iso3 = ANY(:isos) AND last_seen_at >= :t GROUP BY 1"),
+        {"isos": isos, "t": now - timedelta(hours=24), "dr": DISPUTE_ROOTS}).all()
+    return {iso: (v or 0, d or 0) for iso, v, d in rows}
+
+
+def _country_activity(s: Session, isos: list[str], now: datetime, days: int = 7) -> dict[str, list[dict]]:
+    if not isos:
+        return {}
+    start = (now - timedelta(days=days - 1)).date()
+    rows = s.execute(text(
+        "SELECT action_country_iso3, event_date, count(*) FROM event_clusters WHERE kind = 'event' AND quad_class = 4 "
+        "AND action_country_iso3 = ANY(:isos) AND event_date >= :d GROUP BY 1, 2"), {"isos": isos, "d": start}).all()
+    by: dict[str, dict[date, int]] = {}
+    for iso, d, n in rows:
+        by.setdefault(iso, {})[d] = n
+    dates = [start + timedelta(days=i) for i in range(days)]
+    return {iso: [{"date": d.isoformat(), "violent": by.get(iso, {}).get(d, 0)} for d in dates] for iso in isos}
+
+
+def country_stories(s: Session, sts: list[dict], now: datetime | None = None) -> list[dict]:
+    """One card per country where crisis events are happening: "Crisis in <country>".
+
+    A country is listed under the situations whose events take place there (location countries). Countries that
+    only take part from outside (e.g. the United States in Iran–Israel–United States) are shown as "also involved"."""
+    now = now or utcnow()
+    names = dict(s.execute(select(Country.iso3, Country.name)).all())
+    deaths = conflict_deaths_12m(s)
+    by: dict[str, list[dict]] = {}
+    for st in sts:
+        for iso in st["locations"]:
+            by.setdefault(iso, []).append(st)
+    isos = sorted(by)
+    counts = _country_counts(s, isos, now)
+    act = _country_activity(s, isos, now)
+    conf_rank = {"low": 0, "medium": 1, "high": 2}
+    out = []
+    for iso, group in by.items():
+        main_group = [g for g in group if g["group"] == "main"]
+        use = main_group or group
+        name = names.get(iso, iso)
+        d = deaths.get(iso, 0)
+        level = max([g["severity"]["level"] for g in use] + [deaths_level(d)], key=lambda x: LEVEL_RANK.get(x, 0))
+        trend = max((g["trend"]["code"] for g in use), key=lambda x: TREND_RANK[x])
+        conf = max((g["confidence"] for g in use), key=lambda c: conf_rank.get(c["level"], 0))
+        violent, disputes = counts.get(iso, (0, 0))
+        rs: list[str] = []
+        if d >= 25:
+            rs.append(f"About {round_count(d)} people killed in organised violence here in the past 12 months (verified by UCDP)")
+        if trend == "up":
+            rs.append("Violence is rising compared with the previous days")
+        elif trend == "down":
+            rs.append("Fewer violent reports and more talks than in the previous days")
+        if violent:
+            rs.append(f"{violent} reports of attacks, clashes or use of force here in the last 24 hours")
+        if disputes >= 3:
+            rs.append(f"{disputes} threats, demands or diplomatic disputes in the last 24 hours")
+        involved = sorted({c["iso3"] for g in use for c in g["countries"]} - {iso})
+        kind = min((g["kind"] for g in use), key=lambda k: {"conflict": 0, "tension": 1, "domestic": 2}[k])
+        out.append({
+            "iso3": iso, "name": name, "headline": f"Crisis in {name}", "kind": kind, "kind_label": KIND_LABEL[kind],
+            "severity": {"level": level, "label": SEVERITY_WORD.get(level, "Low")},
+            "trend": {"code": trend, "label": TREND[trend]}, "reasons": rs[:3], "confidence": conf,
+            "group": "main" if main_group else "other", "deaths_12m": d or None,
+            "violent_24h": violent, "activity": act.get(iso, []),
+            "situations": [{"id": g["id"], "headline": g["headline"], "severity": g["severity"]}
+                           for g in sorted(use, key=sort_key)],
+            "also_involved": [{"iso3": x, "name": names.get(x, x)} for x in involved],
+        })
+    return sorted(out, key=lambda c: (-LEVEL_RANK.get(c["severity"]["level"], 0), -c["violent_24h"], -(c["deaths_12m"] or 0)))
 
 
 def what_changed(s: Session, sts: list[dict], now: datetime | None = None, limit: int = 12) -> dict:
@@ -263,13 +347,18 @@ def what_changed(s: Session, sts: list[dict], now: datetime | None = None, limit
     return {"items": items[:limit], "note": note}
 
 
-def recent_incidents(s: Session, crisis_id: int, hours: int = 72, limit: int = 8) -> list[dict]:
-    """The most important recent incidents of a crisis as short readable sentences (≥2 outlets reporting)."""
+def recent_incidents(s: Session, crisis_id: int | None = None, hours: int = 72, limit: int = 8,
+                     country_iso3: str | None = None) -> list[dict]:
+    """The most important recent incidents of a crisis (or that happened in a country) as short readable
+    sentences (≥2 outlets reporting)."""
     since = utcnow() - timedelta(hours=hours)
     q = (select(EventCluster, NormalizedGeopoliticalEvent)
-         .join(CrisisEvent, CrisisEvent.event_cluster_id == EventCluster.id)
-         .outerjoin(NormalizedGeopoliticalEvent, NormalizedGeopoliticalEvent.id == EventCluster.representative_event_id)
-         .where(CrisisEvent.crisis_id == crisis_id, EventCluster.kind == "event", EventCluster.last_seen_at >= since,
+         .outerjoin(NormalizedGeopoliticalEvent, NormalizedGeopoliticalEvent.id == EventCluster.representative_event_id))
+    if crisis_id is not None:
+        q = q.join(CrisisEvent, CrisisEvent.event_cluster_id == EventCluster.id).where(CrisisEvent.crisis_id == crisis_id)
+    if country_iso3 is not None:
+        q = q.where(EventCluster.action_country_iso3 == country_iso3)
+    q = (q.where(EventCluster.kind == "event", EventCluster.last_seen_at >= since,
                 EventCluster.event_root_code.in_(INCIDENT_ROOTS),
                 func.cardinality(EventCluster.source_domains) >= 2)
          .order_by(desc(EventCluster.max_severity * func.least(func.cardinality(EventCluster.source_domains), 20)))
@@ -280,9 +369,16 @@ def recent_incidents(s: Session, crisis_id: int, hours: int = 72, limit: int = 8
     actors = {aid: (t, cid) for aid, t, cid in s.execute(
         select(Actor.id, Actor.actor_type, Actor.country_id).where(Actor.id.in_(actor_ids))).all()} if actor_ids else {}
     countries = {cid: (iso3, name) for cid, iso3, name in s.execute(select(Country.id, Country.iso3, Country.name)).all()}
+    by_iso3 = {iso3: name for iso3, name in countries.values()}
     out, seen = [], set()
     for cl, ev in rows:
-        text_ = incident_sentence(cl, describe_event(ev, actors, countries) if ev else None)
+        if ev is not None:
+            d = describe_event(ev, actors, countries)
+        else:  # no source-event detail: still say what happened and where
+            cname = by_iso3.get(cl.action_country_iso3 or "")
+            empty = {"kind": None, "iso3": None, "country": None, "igo": None}
+            d = {"a": empty, "b": empty, "place": cname, "place_iso3": cl.action_country_iso3, "place_country": cname}
+        text_ = incident_sentence(cl, d)
         if text_ is None or text_ in seen:
             continue
         seen.add(text_)

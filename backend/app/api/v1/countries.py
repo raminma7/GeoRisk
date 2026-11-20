@@ -91,6 +91,16 @@ def _country_crises(s: Session, iso3: str) -> list[dict]:
     return [{**ser_crisis_card(c, regions.get(c.region_id), names), "story": stories.get(c.id)} for c in cs]
 
 
+def _country_story(s: Session, iso3: str) -> dict:
+    """"Crisis in <country>" summary + recent incidents that happened in the country."""
+    from app.monitoring import plain
+
+    sts = [st for st in plain.active_stories(s) if iso3 in st["locations"]]
+    story = next((x for x in plain.country_stories(s, sts) if x["iso3"] == iso3), None)
+    return {"story": story,
+            "recent_incidents": plain.recent_incidents(s, country_iso3=iso3, limit=10)}
+
+
 def _relationships(s: Session, cid: int, limit: int = 15) -> list[dict]:
     latest = s.scalar(select(func.max(CountryRelationship.window_end)))
     if not latest:
@@ -138,6 +148,7 @@ def country_detail(code: str, s: Session = Depends(get_db), _: Principal = Depen
         "country": {**ser_country(c, rn), "groups": groups, "aliases": aliases},
         "indicators": _latest_indicators(s, c.iso3),
         "crises": _country_crises(s, c.iso3),
+        **_country_story(s, c.iso3),
         "relationships": _relationships(s, c.id),
         "timeline": daily_series(s, [c.iso3])[c.iso3],
         "ml_risk": _ml_risk(s, c.iso3),

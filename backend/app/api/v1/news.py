@@ -71,6 +71,7 @@ def events(country: str | None = None, region: str | None = None, category: str 
            root_code: str | None = None, quad_class: int | None = Query(None, ge=1, le=4),
            verification: str | None = None, crisis: str | None = None, start: date | None = None,
            end: date | None = None, min_severity: float = 0.0,
+           located_in: str | None = Query(None, description="ISO3: only events that happened in this country (map/clusters)"),
            view: str = Query("events", pattern="^(events|clusters|map)$"),
            p: Pagination = Depends(), s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     st, en = default_range(start, end, days=2)
@@ -79,6 +80,8 @@ def events(country: str | None = None, region: str | None = None, category: str 
                                        EventCluster.max_severity >= min_severity)
         if country:
             q = q.where(EventCluster.country_iso3s.contains([country.upper()]))
+        if located_in:
+            q = q.where(EventCluster.action_country_iso3 == located_in.upper())
         if region:
             q = q.where(EventCluster.action_country_iso3.in_(region_iso3s(s, region)))
         if root_code:

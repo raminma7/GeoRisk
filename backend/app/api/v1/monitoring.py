@@ -150,8 +150,9 @@ def today(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
 
     now = utcnow()
     sts = plain.active_stories(s, now)
-    main = [x for x in sts if x["group"] == "main"]
-    other = [x for x in sts if x["group"] == "other"]
+    cs = plain.country_stories(s, sts, now)
+    main = [x for x in cs if x["group"] == "main"]
+    other = [x for x in cs if x["group"] == "other"]
     ew = _early_warning(s)
     at_risk = 0
     if ew:
@@ -159,12 +160,12 @@ def today(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
 
         lv = P.count_by_level(s, ew["model_version"], date.fromisoformat(ew["window"]["start"]))
         at_risk = (lv.get("very_high") or 0) + (lv.get("high") or 0)
-    summary = {"situations": len(main), "serious": sum(1 for x in main if x["severity"]["level"] in ("critical", "high")),
+    summary = {"countries": len(main), "serious": sum(1 for x in main if x["severity"]["level"] in ("critical", "high")),
                "getting_worse": sum(1 for x in main if x["trend"]["code"] == "up"),
                "calming": sum(1 for x in main if x["trend"]["code"] == "down"), "countries_at_risk": at_risk}
     return {
-        "generated_at": iso(now), "summary": summary, "situations": main[:20],
-        "other_signals": [{k: x[k] for k in ("id", "headline", "severity", "confidence", "countries", "reasons")} for x in other[:20]],
+        "generated_at": iso(now), "summary": summary, "countries": main[:30],
+        "other_signals": [{k: x[k] for k in ("iso3", "headline", "severity", "confidence", "reasons")} for x in other[:25]],
         "other_signals_total": len(other),
         "what_changed": plain.what_changed(s, sts, now),
         "could_start_soon": ew,
@@ -176,8 +177,10 @@ def today(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
             "trend": "Compared with the previous days.",
             "confirmed": "How many independent news outlets report it. News reports are extracted automatically and are "
                          "not verified one by one; death counts come from the UCDP research dataset.",
-            "other_signals": "Reports from a single country without verified conflict deaths (often crime or police "
+            "other_signals": "Countries with only local reports and no verified conflict deaths (often crime or police "
                              "news), or with very few sources. Shown separately so they don't crowd out real crises.",
+            "countries": "A country is listed when crisis events are happening there. Countries that take part from "
+                         "outside are shown as 'also involved'.",
         },
     }
 

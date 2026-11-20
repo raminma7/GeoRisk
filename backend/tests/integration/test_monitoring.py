@@ -135,8 +135,20 @@ def test_media_volume_alone_does_not_drive_score(db):
     assert inflated - base < 8
 
 
+def ingested_history(db, hours=96):
+    """Mark every 15-minute GDELT batch of the last `hours` as ingested (trends need data on both sides)."""
+    from app.ingestion.models import DataSource, IngestionBatch
+
+    src = db.scalar(select(DataSource.id).where(DataSource.key == "gdelt_events"))
+    for i in range(hours * 4):
+        t = FIXTURE_NOW - timedelta(minutes=15 * i)
+        db.add(IngestionBatch(data_source_id=src, batch_key=f"t{i}", batch_time=t, status="done"))
+    db.commit()
+
+
 def test_de_escalation_direction(db):
     # strong conflict 2-4 days ago, quiet conflict + cooperation in the last day
+    ingested_history(db)
     for i in range(10):
         add_cluster(db, {"UKR", "RUS"}, "UKR", hours_ago=50 + i, domains=(f"s{i}.com", "x.com", "y.com"))
     db.commit()
@@ -149,6 +161,7 @@ def test_de_escalation_direction(db):
     db.commit()
     mp = score_crisis(db, crisis, now=FIXTURE_NOW)
     assert mp.direction == "de_escalating"
+    assert mp.components["_direction"]["inputs"]["data_coverage_prior_72h"] == 1.0
     alerts = evaluate_alerts(db, [mp])
     assert any(a.alert_type == "de_escalation" for a in alerts)
 
@@ -161,3 +174,20 @@ def test_pipeline_on_real_fixtures(ingested, monkeypatch):
     assert out["priorities"] == ingested.scalar(select(func.count()).select_from(Crisis).where(
         Crisis.status.in_(["candidate", "active", "dormant"])))
     assert ingested.scalar(select(func.count()).select_from(MonitoringPriority)) == out["priorities"]
+
+
+def test_no_trend_without_ingested_history(db):
+    """Right after installation (or downtime) the earlier days are empty: a 24h burst must not read as 'getting worse'."""
+    for i in range(12):
+        add_cluster(db, {"UKR", "RUS"}, "UKR", hours_ago=60 + i, domains=(f"o{i}.com", "x.com", "y.com"))
+    db.commit()
+    CrisisEngine(db, now=FIXTURE_NOW - timedelta(hours=50)).run()
+    db.commit()
+    crisis = db.scalar(select(Crisis))
+    for i in range(20):
+        c = add_cluster(db, {"UKR", "RUS"}, "UKR", hours_ago=1 + i % 10, domains=(f"n{i}.com", "x.com", "y.com"))
+        db.add(CrisisEvent(crisis_id=crisis.id, event_cluster_id=c.id, match_score=1.0, reason={}))
+    db.commit()
+    assert score_crisis(db, crisis, now=FIXTURE_NOW).direction == "stable"  # no ingested batches recorded
+    ingested_history(db)
+    assert score_crisis(db, crisis, now=FIXTURE_NOW).direction == "escalating"

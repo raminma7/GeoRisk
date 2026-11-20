@@ -98,6 +98,21 @@ def _window_has_data(session: Session, start: datetime, end: datetime) -> bool:
     ), {"s": start, "e": end}))
 
 
+def window_coverage(session: Session, start: datetime, end: datetime) -> float:
+    """Share of the 15-minute GDELT batches in [start, end) that were ingested (0..1).
+
+    A trend compares the last 24h with the days before; if the earlier days were not (fully) ingested, e.g. right
+    after installation or after downtime, the comparison would show a jump everywhere, so it is skipped."""
+    expected = max(1, int((end - start).total_seconds() // 900))
+    got = session.scalar(text(
+        "SELECT count(DISTINCT batch_time) FROM ingestion_batches WHERE status='done' AND batch_time > :s AND batch_time <= :e"
+    ), {"s": start, "e": end}) or 0
+    return min(1.0, got / expected)
+
+
+MIN_TREND_COVERAGE = 0.8
+
+
 def _intensity(cls: list[WindowCluster]) -> float:
     return sum(c.severity for c in cls if c.quad in (3, 4))
 
@@ -236,7 +251,12 @@ def score_crisis(session: Session, crisis: Crisis, now: datetime | None = None) 
     coop24 = sum(1 for c in w24 if c.root in COOP_ROOTS)
     coop_prior = sum(1 for c in prior72 if c.root in COOP_ROOTS) / 3
     deesc_codes = _de_escalation_events(session, [c.id for c in w24])
-    if i24 >= 1.5 and i24 > 1.5 * max(iprior, 0.5) and prior72:
+    cov_now = window_coverage(session, now - timedelta(hours=24), now)
+    cov_prior = window_coverage(session, now - timedelta(hours=96), now - timedelta(hours=24))
+    comparable = cov_now >= MIN_TREND_COVERAGE and cov_prior >= MIN_TREND_COVERAGE
+    if not comparable:
+        direction = "stable"  # not enough ingested history on one side to call a trend
+    elif i24 >= 1.5 and i24 > 1.5 * max(iprior, 0.5) and prior72:
         direction = "escalating"
     elif prior72 and iprior >= 1.0 and i24 < 0.6 * iprior and (coop24 >= coop_prior or deesc_codes > 0):
         direction = "de_escalating"
@@ -244,7 +264,8 @@ def score_crisis(session: Session, crisis: Crisis, now: datetime | None = None) 
         direction = "stable"
     direction_inputs = {"conflict_intensity_24h": round(i24, 2), "conflict_intensity_prior_daily_avg": round(iprior, 2),
                         "cooperation_clusters_24h": coop24, "cooperation_prior_daily_avg": round(coop_prior, 2),
-                        "de_escalation_coded_events_24h": deesc_codes}
+                        "de_escalation_coded_events_24h": deesc_codes,
+                        "data_coverage_24h": round(cov_now, 2), "data_coverage_prior_72h": round(cov_prior, 2)}
 
     corr = comps["corroboration"]["value"]
     confidence = round(0.5 * corr + 0.3 * multi_share + 0.2 * compl, 3)

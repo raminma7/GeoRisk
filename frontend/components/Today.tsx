@@ -1,6 +1,6 @@
 "use client";
 
-/* "Today": the simple, readable front page. One summary line, situations as cards (headline, severity, trend,
+/* "Today": the simple, readable front page. One summary line, countries in crisis as cards (headline, severity, trend,
    2–3 plain reasons, how well confirmed, last-7-days activity), what changed, and countries that could see a new
    conflict. Severity colours are the reserved status colours and always come with an icon + text label. */
 
@@ -19,10 +19,16 @@ export type Story = {
   activity: { date: string; violent: number }[]; last_event_at: string | null; deaths_12m: number | null;
   title: string; latitude: number | null; longitude: number | null; priority: { score: number; level: string; direction: string };
 };
+export type CountryStory = {
+  iso3: string; name: string; headline: string; kind: Story["kind"]; kind_label: string; severity: Story["severity"];
+  trend: Story["trend"]; reasons: string[]; confidence: Story["confidence"]; deaths_12m: number | null; violent_24h: number;
+  activity: Story["activity"]; situations: { id: number; headline: string; severity: Story["severity"] }[];
+  also_involved: { iso3: string; name: string }[];
+};
 type Today = {
   generated_at: string;
-  summary: { situations: number; serious: number; getting_worse: number; calming: number; countries_at_risk: number };
-  situations: Story[]; other_signals: Pick<Story, "id" | "headline" | "severity" | "confidence" | "countries" | "reasons">[];
+  summary: { countries: number; serious: number; getting_worse: number; calming: number; countries_at_risk: number };
+  countries: CountryStory[]; other_signals: Pick<CountryStory, "iso3" | "headline" | "severity" | "confidence" | "reasons">[];
   other_signals_total: number;
   what_changed: { items: { kind: "worse" | "better" | "new"; crisis_id: number; text: string }[]; note: string | null };
   could_start_soon: null | { window: { start: string; end: string }; items: Prediction[] };
@@ -80,28 +86,35 @@ export function ActivityBars({ data, height = 28 }: { data: Story["activity"]; h
   );
 }
 
-export function SituationCard({ s }: { s: Story }) {
+export function CountryCard({ c }: { c: CountryStory }) {
+  const n = c.situations.length;
   return (
-    <Link href={`/geopolitics/crises/${s.id}`}
+    <Link href={`/geopolitics/countries/${c.iso3}`}
       className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-line bg-surface p-4 pl-5 transition hover:-translate-y-0.5 hover:border-accent/60 hover:shadow-sm">
-      <span aria-hidden className={`absolute inset-y-0 left-0 w-1.5 ${(SEV[s.severity.level] || SEV.low).bar}`} />
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-1.5 ${(SEV[c.severity.level] || SEV.low).bar}`} />
       <div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted">{s.kind_label}</span>
-          <SeverityChip s={s.severity} />
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted">{c.kind_label}</span>
+          <SeverityChip s={c.severity} />
         </div>
-        <h3 className="mt-1 text-base font-semibold leading-snug group-hover:text-accent">{s.headline}</h3>
-        <div className="mt-0.5"><Trend t={s.trend} /></div>
+        <h3 className="mt-1 text-lg font-semibold leading-snug group-hover:text-accent">{c.headline}</h3>
+        <div className="mt-0.5"><Trend t={c.trend} /></div>
       </div>
       <ul className="space-y-1 text-sm text-ink2">
-        {s.reasons.map((r) => <li key={r} className="flex gap-2"><span aria-hidden className="mt-2 h-1 w-1 shrink-0 rounded-full bg-muted" />{r}</li>)}
+        {c.reasons.map((r) => <li key={r} className="flex gap-2"><span aria-hidden className="mt-2 h-1 w-1 shrink-0 rounded-full bg-muted" />{r}</li>)}
       </ul>
+      {(n > 1 || c.also_involved.length > 0) && (
+        <p className="text-xs text-muted">
+          {n > 1 && <>{n} related situations</>}{n > 1 && c.also_involved.length > 0 && " · "}
+          {c.also_involved.length > 0 && <>also involves {c.also_involved.slice(0, 3).map((x) => x.name).join(", ")}{c.also_involved.length > 3 ? ` +${c.also_involved.length - 3}` : ""}</>}
+        </p>
+      )}
       <div className="mt-auto flex items-end justify-between gap-3 border-t border-line pt-3">
-        <ConfirmedBars c={s.confidence} />
-        {s.activity?.length > 0 && (
+        <ConfirmedBars c={c.confidence} />
+        {c.activity?.length > 0 && (
           <div className="flex items-end gap-2">
             <span className="text-[11px] text-muted">violent reports, 7 days</span>
-            <ActivityBars data={s.activity} />
+            <ActivityBars data={c.activity} />
           </div>
         )}
       </div>
@@ -112,7 +125,7 @@ export function SituationCard({ s }: { s: Story }) {
 function SummaryLine({ t }: { t: Today }) {
   const s = t.summary;
   const items: [number, string, string][] = [
-    [s.situations, "situations followed", "text-ink"],
+    [s.countries, "countries in crisis", "text-ink"],
     [s.serious, "serious", "text-serious"],
     [s.getting_worse, "getting worse", "text-crit"],
     [s.calming, "calming down", "text-good"],
@@ -184,7 +197,7 @@ export default function TodayView() {
   const [all, setAll] = useState(false);
   if (error) return <ErrorBox error={error} retry={() => mutate()} />;
   if (isLoading || !data) return <Loading what="today's overview" />;
-  const shown = all ? data.situations : data.situations.slice(0, 8);
+  const shown = all ? data.countries : data.countries.slice(0, 8);
   return (
     <div className="space-y-5">
       <header className="space-y-3">
@@ -200,11 +213,11 @@ export default function TodayView() {
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <div className="grid gap-3 md:grid-cols-2">
-            {shown.map((s) => <SituationCard key={s.id} s={s} />)}
+            {shown.map((c) => <CountryCard key={c.iso3} c={c} />)}
           </div>
-          {data.situations.length > 8 && (
+          {data.countries.length > 8 && (
             <button className="btn w-full justify-center" onClick={() => setAll(!all)}>
-              {all ? "Show fewer" : `Show all ${data.situations.length} situations`}
+              {all ? "Show fewer" : `Show all ${data.countries.length} countries`}
             </button>
           )}
           {data.other_signals.length > 0 && (
@@ -215,7 +228,7 @@ export default function TodayView() {
               <p className="mt-2 text-xs text-muted">{data.how_to_read.other_signals}</p>
               <ul className="mt-3 divide-y divide-line">
                 {data.other_signals.map((o) => (
-                  <li key={o.id}><Link href={`/geopolitics/crises/${o.id}`} className="flex items-center justify-between gap-3 py-2 text-sm hover:text-accent">
+                  <li key={o.iso3}><Link href={`/geopolitics/countries/${o.iso3}`} className="flex items-center justify-between gap-3 py-2 text-sm hover:text-accent">
                     <span className="min-w-0 truncate">{o.headline}</span>
                     <span className="flex shrink-0 items-center gap-3"><ConfirmedBars c={o.confidence} /><SeverityChip s={o.severity} /></span>
                   </Link></li>
