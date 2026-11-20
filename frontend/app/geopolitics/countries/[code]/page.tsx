@@ -1,6 +1,6 @@
 "use client";
 
-/* "Crisis in <country>": how serious, why, what happened recently, related situations, where, and the model's
+/* "Crisis in <country>": how serious, why, what happened recently, where, and the model's
    risk of a new conflict. */
 
 import dynamic from "next/dynamic";
@@ -86,16 +86,6 @@ export default function CountryPage({ params }: { params: Promise<{ code: string
                   <p className="mt-2 text-[11px] text-muted">Events are extracted automatically from news and not verified one by one.</p>
                 </section>
 
-                <section className="rounded-2xl border border-line bg-surface p-5">
-                  <h2 className="mb-2 font-semibold">Related situations</h2>
-                  <ul className="divide-y divide-line">
-                    {s.situations.map((x) => (
-                      <li key={x.id}><Link href={`/geopolitics/crises/${x.id}`} className="flex items-center justify-between gap-3 py-2 text-sm hover:text-accent">
-                        <span>{x.headline}</span><SeverityChip s={x.severity} />
-                      </Link></li>
-                    ))}
-                  </ul>
-                </section>
               </div>
 
               <aside className="space-y-4">

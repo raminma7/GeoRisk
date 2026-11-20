@@ -87,7 +87,6 @@ export function ActivityBars({ data, height = 28 }: { data: Story["activity"]; h
 }
 
 export function CountryCard({ c }: { c: CountryStory }) {
-  const n = c.situations.length;
   return (
     <Link href={`/geopolitics/countries/${c.iso3}`}
       className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-line bg-surface p-4 pl-5 transition hover:-translate-y-0.5 hover:border-accent/60 hover:shadow-sm">
@@ -103,10 +102,9 @@ export function CountryCard({ c }: { c: CountryStory }) {
       <ul className="space-y-1 text-sm text-ink2">
         {c.reasons.map((r) => <li key={r} className="flex gap-2"><span aria-hidden className="mt-2 h-1 w-1 shrink-0 rounded-full bg-muted" />{r}</li>)}
       </ul>
-      {(n > 1 || c.also_involved.length > 0) && (
+      {c.also_involved.length > 0 && (
         <p className="text-xs text-muted">
-          {n > 1 && <>{n} related situations</>}{n > 1 && c.also_involved.length > 0 && " · "}
-          {c.also_involved.length > 0 && <>also involves {c.also_involved.slice(0, 3).map((x) => x.name).join(", ")}{c.also_involved.length > 3 ? ` +${c.also_involved.length - 3}` : ""}</>}
+          also involves {c.also_involved.slice(0, 3).map((x) => x.name).join(", ")}{c.also_involved.length > 3 ? ` +${c.also_involved.length - 3}` : ""}
         </p>
       )}
       <div className="mt-auto flex items-end justify-between gap-3 border-t border-line pt-3">
