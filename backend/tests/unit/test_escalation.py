@@ -53,3 +53,25 @@ def test_levels_and_reasons():
     assert format_value("wdi_log_gdp_per_capita", float(np.log(1500))) == "$1,500"
     assert format_value("tier_now", 2.0) == "High" and format_value("news_violent_vs_normal", 1.84) == "1.8×"
     assert format_value("wdi_inflation_pct", None) == "no data"
+
+
+def test_better_label_for_a_war_that_calms_down():
+    lab = escalation_labels(cm_for([300] * 14 + [10] * 6), 3).set_index("month")  # 3,600 a year, then ~120 a year
+    t = pd.Timestamp("2001-03-01")  # month 14: previous 12 months High, next 3 months 30 deaths -> Moderate
+    assert lab.loc[t, "can_fall_3m"] == 1 and lab.loc[t, "better_3m"] == 1.0
+    quiet = escalation_labels(cm_for([0] * 20), 3)
+    assert set(quiet["can_fall_3m"]) == {0} and quiet["better_3m"].isna().all()  # Low cannot get better
+
+
+def test_outlook_rule():
+    from types import SimpleNamespace as N
+
+    from app.ml.predictions import outlook
+
+    assert outlook(N(probability=0.20), N(probability=0.10), 0.15, 0.27)["direction"] == "worse"
+    assert outlook(N(probability=0.05), N(probability=0.40), 0.15, 0.27)["direction"] == "better"
+    same = outlook(N(probability=0.05), N(probability=0.10), 0.15, 0.27)
+    assert same["direction"] == "same" and same["label"] == "Likely to stay the same"
+    # both pass: the stronger signal relative to its threshold wins (0.30/0.15 = 2.0 vs 0.40/0.27 = 1.5)
+    assert outlook(N(probability=0.30), N(probability=0.40), 0.15, 0.27)["direction"] == "worse"
+    assert outlook(None, N(probability=0.90), 0.15, 0.27)["direction"] == "better"  # Critical: only 'better' applies

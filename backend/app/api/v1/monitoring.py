@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -146,24 +146,15 @@ def overview(s: Session = Depends(get_db), _: Principal = Depends(require_read))
 
 
 def _attach_outlook(s: Session, countries: list[dict]) -> None:
-    """Each country card gets the model's 'could get worse' outlook for the next 3 and 6 months (if predicted)."""
-    from app.api.v1.predictions import six_months
+    """Each country card gets the model's outlook (worse / better / same) for the next 3 and 6 months."""
     from app.ml import predictions as P
-    from app.ml.models import MlPrediction
 
-    lw = P.latest_window(s)
-    if not lw:
-        return
-    three = {p.iso3: p for p in s.scalars(select(MlPrediction).where(
-        MlPrediction.model_name == P.MODEL, MlPrediction.model_version == lw[0], MlPrediction.window_start == lw[1]))}
-    six = six_months(s)
+    o3, o6 = P.outlooks(s, 3), P.outlooks(s, 6)
     for c in countries:
-        p3, p6 = three.get(c["iso3"]), six.get(c["iso3"])
-        c["outlook"] = None if p3 is None else {
-            "status": p3.status, "level": p3.level, "times_average": p3.times_average,
-            "window": {"start": iso(p3.window_start), "end": iso(p3.window_end)},
-            "six_months": None if p6 is None else {"level": p6.level, "times_average": p6.times_average,
-                                                   "window": {"start": iso(p6.window_start), "end": iso(p6.window_end)}},
+        a, b = o3.get(c["iso3"]), o6.get(c["iso3"])
+        c["outlook"] = None if a is None else {
+            "direction": a["direction"], "label": a["label"], "chance": a["chance"], "window": a["window"],
+            "six_months": None if b is None else {"direction": b["direction"], "label": b["label"], "window": b["window"]},
         }
 
 
@@ -178,12 +169,9 @@ def today(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     main = [x for x in cs if x["group"] == "main"]
     other = [x for x in cs if x["group"] == "other"]
     ew = _early_warning(s)
-    at_risk = 0
-    if ew:
-        from app.ml import predictions as P
+    from app.ml import predictions as P
 
-        lv = P.count_by_level(s, ew["model_version"], date.fromisoformat(ew["window"]["start"]))
-        at_risk = (lv.get("very_high") or 0) + (lv.get("high") or 0)
+    at_risk = sum(1 for o in P.outlooks(s, 3).values() if o["direction"] == "worse")
     by_level = {lv: sum(1 for x in main if x["severity"]["level"] == lv) for lv in ("critical", "high", "elevated", "low")}
     summary = {"countries": len(main), "serious": by_level["critical"] + by_level["high"], "by_level": by_level,
                **plain.violence_totals(s, now),

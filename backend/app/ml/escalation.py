@@ -31,12 +31,18 @@ from app.ml.enrichment import GROUPS, SEED, build_enriched
 log = get_logger(__name__)
 
 HORIZONS = (3, 6)
+# direction -> (rows it applies to, model name prefix)
+KINDS = {"worse": ("can_rise", "crisis_escalation"), "better": ("can_fall", "crisis_calming")}
 TIER_CUTS = (100, 1_000, 10_000)          # deaths per year
 TIER_NAMES = ["low", "elevated", "high", "critical"]
 LABEL_DEFINITION = ("Deaths from organised violence (UCDP, all types) in the next {h} months, scaled to a year, put "
                     "the country at least one severity tier above its tier over the previous 12 months "
                     "(tiers: <100, 100-999, 1,000-9,999, 10,000+ deaths per year). Countries already at the top "
                     "tier are excluded.")
+
+CALM_DEFINITION = ("Deaths from organised violence (UCDP, all types) in the next {h} months, scaled to a year, put "
+                   "the country at least one severity tier below its tier over the previous 12 months. Only countries "
+                   "at Moderate or above.")
 
 SELECTED_DYNAMICS = ["news_violent_share_chg_6m", "news_threat_share_chg_6m", "news_avg_tone_chg_3m",
                      "news_avg_goldstein_chg_3m", "news_coverage_change_3m", "news_violent_share", "nb_sb_events_l1_chg_6m",
@@ -102,6 +108,9 @@ def escalation_labels(cm: pd.DataFrame, h: int) -> pd.DataFrame:
             f"can_rise_{h}m": ((now_t < len(TIER_CUTS)) & prev12.notna()).astype(int),
             f"deaths_next_{h}m": nxt,
             f"worse_{h}m": np.where(ok & (now_t < len(TIER_CUTS)), (next_t > now_t).astype(float), np.nan),
+            # the opposite question for countries in crisis: will it move down at least one level?
+            f"can_fall_{h}m": ((now_t > 0) & prev12.notna()).astype(int),
+            f"better_{h}m": np.where(ok & (now_t > 0), (next_t < now_t).astype(float), np.nan),
         }))
     return pd.concat(rows, ignore_index=True)
 
@@ -133,10 +142,10 @@ def classifier():
                               random_state=SEED, verbose=-1)
 
 
-def walk_forward(df: pd.DataFrame, feats: list[str], h: int, years: list[int]) -> pd.DataFrame:
+def walk_forward(df: pd.DataFrame, feats: list[str], h: int, years: list[int], kind: str = "worse") -> pd.DataFrame:
     """Out-of-time predictions: each test year is scored by a model trained only on rows whose whole label window
     ended before that year (no outcome from the test year leaks into training)."""
-    label, risk = f"worse_{h}m", f"can_rise_{h}m"
+    label, risk = f"{kind}_{h}m", f"{KINDS[kind][0]}_{h}m"
     data = df[(df[risk] == 1) & df[label].notna()]
     out = []
     for year in years:
@@ -165,25 +174,43 @@ def top_k_caught(pred: pd.DataFrame, label: str, score: str, k: int = 20) -> flo
     return round(float(r[label].sum() / max(pred[label].sum(), 1)), 3)
 
 
-def report(pred: pd.DataFrame, h: int) -> dict:
-    label = f"worse_{h}m"
+def report(pred: pd.DataFrame, h: int, kind: str = "worse") -> dict:
+    label = f"{kind}_{h}m"
     y = pred[label].astype(int).to_numpy()
+    sign = 1 if kind == "worse" else -1  # for 'better', a falling trend / calmer news is the signal
     scores = {
         "model": pred["raw"].to_numpy(),
         # simple rules a reader could apply by hand, for comparison
-        "rule_deaths_trend": pred["deaths_trend_3v9"].fillna(1).to_numpy(),
-        "rule_violent_news": pred["news_violent_vs_normal"].fillna(1).to_numpy(),
+        "rule_deaths_trend": sign * pred["deaths_trend_3v9"].fillna(1).to_numpy(),
+        "rule_violent_news": sign * pred["news_violent_vs_normal"].fillna(1).to_numpy(),
     }
     out: dict = {}
     for name, s in scores.items():
         tmp = pred.assign(_s=s)
         out[name] = {**_metrics(y, s), "top20_caught": top_k_caught(tmp, label, "_s")}
     by_tier = {}
-    for t, name in enumerate(TIER_NAMES[:-1]):
+    tiers = range(len(TIER_NAMES) - 1) if kind == "worse" else range(1, len(TIER_NAMES))
+    for t in tiers:
         sub = pred[pred["tier_now"] == t]
-        by_tier[name] = _metrics(sub[label].astype(int).to_numpy(), sub["raw"].to_numpy())
+        by_tier[TIER_NAMES[t]] = _metrics(sub[label].astype(int).to_numpy(), sub["raw"].to_numpy())
     out["model_by_current_tier"] = by_tier
     return out
+
+
+def decision_threshold(y: np.ndarray, p: np.ndarray) -> dict:
+    """Calibrated probability above which the site says 'could get worse / better' (best F1 on out-of-time data),
+    with the precision and recall it had in the test years."""
+    best = {"threshold": 0.5, "f1": 0.0, "precision": None, "recall": None}
+    for t in np.arange(0.05, 0.8, 0.01):
+        hit = p >= t
+        if not hit.any():
+            continue
+        prec, rec = y[hit].mean(), y[hit].sum() / max(y.sum(), 1)
+        f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
+        if f1 > best["f1"]:
+            best = {"threshold": round(float(t), 2), "f1": round(float(f1), 3), "precision": round(float(prec), 3),
+                    "recall": round(float(rec), 3)}
+    return best
 
 
 def importance(model, feats: list[str], top: int = 20) -> list[tuple[str, float]]:
@@ -202,10 +229,10 @@ def train_and_export(session: Session, test_years: list[int] | None = None,
     prov = df.attrs.get("provenance", {})
     feats = features()
     results = {}
-    for h in HORIZONS:
-        label, risk = f"worse_{h}m", f"can_rise_{h}m"
-        pred = walk_forward(df, feats, h, test_years)
-        rep = report(pred, h)
+    for kind, h in [(k, h) for k in KINDS for h in HORIZONS]:
+        label, risk = f"{kind}_{h}m", f"{KINDS[kind][0]}_{h}m"
+        pred = walk_forward(df, feats, h, test_years, kind)
+        rep = report(pred, h, kind)
         # Platt calibration on the out-of-time raw scores
         raw = np.clip(pred["raw"].to_numpy(), 1e-6, 1 - 1e-6)
         platt = LogisticRegression(C=1e6, max_iter=1000).fit(np.log(raw / (1 - raw)).reshape(-1, 1),
@@ -213,6 +240,7 @@ def train_and_export(session: Session, test_years: list[int] | None = None,
         grid = np.unique(np.concatenate([np.linspace(0, 1, 401), np.quantile(raw, np.linspace(0, 1, 201))]))
         gl = np.log(np.clip(grid, 1e-6, 1 - 1e-6) / (1 - np.clip(grid, 1e-6, 1 - 1e-6))).reshape(-1, 1)
         cal_y = platt.predict_proba(gl)[:, 1]
+        rep["decision"] = decision_threshold(pred[label].astype(int).to_numpy(), np.interp(raw, grid, cal_y))
 
         data = df[(df[risk] == 1) & df[label].notna()]
         model = classifier().fit(data[feats], data[label].astype(int))
@@ -221,7 +249,7 @@ def train_and_export(session: Session, test_years: list[int] | None = None,
         checksum = hashlib.sha256(buf.getvalue()).hexdigest()
         trained = datetime.now(UTC)
         version = f"v{trained:%Y%m%d}-{checksum[:8]}"
-        name = f"crisis_escalation_{h}m"
+        name = f"{KINDS[kind][1]}_{h}m"
         pkg = Path(settings.model_dir) / name / version
         pkg.mkdir(parents=True, exist_ok=True)
         model.booster_.save_model(str(pkg / "model.txt"))
@@ -229,8 +257,11 @@ def train_and_export(session: Session, test_years: list[int] | None = None,
                                                          "y": cal_y.tolist()}))
         meta = {
             "name": name, "version": version, "trained_at": trained.isoformat(), "horizon_months": h,
-            "features": feats, "label": label, "label_definition": LABEL_DEFINITION.format(h=h),
-            "applies_to": "Every country except those already at the top tier (10,000+ deaths a year)",
+            "features": feats, "label": label, "direction": kind,
+            "label_definition": (LABEL_DEFINITION if kind == "worse" else CALM_DEFINITION).format(h=h),
+            "applies_to": ("Every country except those already at the top tier (10,000+ deaths a year)" if kind == "worse"
+                           else "Countries at Moderate or above (100+ deaths a year)"),
+            "decision_threshold": rep["decision"]["threshold"],
             "prediction_window": f"the {h} months after the data ends",
             "training_rows": len(data), "training_positives": int(data[label].sum()),
             "base_rate": float(data[label].mean()),

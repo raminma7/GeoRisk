@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { LEVEL_META, LevelChip, monthRange, type Level, type Prediction } from "@/components/EarlyWarning";
+import { LevelChip, OutlookChip, monthRange, type Direction, type Prediction } from "@/components/EarlyWarning";
 import { ErrorBox, Loading } from "@/components/ui";
 import { useApi } from "@/lib/api";
 
@@ -23,8 +23,8 @@ export type CountryStory = {
   trend: Story["trend"]; reasons: string[]; confidence: Story["confidence"]; deaths_12m: number | null; violent_24h: number;
   activity: Story["activity"]; situations: { id: number; headline: string; severity: Story["severity"] }[];
   also_involved: { iso3: string; name: string }[];
-  outlook?: null | { status: string; level: Level | null; times_average: number | null; window: { start: string; end: string };
-    six_months: null | { level: Level | null; times_average: number | null; window: { start: string; end: string } } };
+  outlook?: null | { direction: Direction; label: string; chance: number | null; window: { start: string; end: string } | null;
+    six_months: null | { direction: Direction; label: string } };
 };
 type Today = {
   generated_at: string;
@@ -87,16 +87,13 @@ export function ActivityBars({ data, height = 28 }: { data: Story["activity"]; h
   );
 }
 
-/* The model's outlook on a country card: risk of moving up a severity level in the next 3 and 6 months. */
+/* The model's outlook on a country card: better / worse / same in the next 3 and 6 months. */
 function Outlook({ o }: { o: CountryStory["outlook"] }) {
   if (!o) return null;
-  if (o.status === "top_tier") return <p className="text-xs text-muted">Already at the highest severity level.</p>;
-  if (!o.level) return null;
-  const word = (l: Level | null) => (l ? LEVEL_META[l].label.toLowerCase() : "unknown");
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-raised px-2.5 py-1.5 text-xs ring-1 ring-inset ring-line">
-      <span className="text-muted">Risk of getting worse · next 3 months</span><LevelChip level={o.level} />
-      {o.six_months?.level && <span className="text-muted">· 6 months: {word(o.six_months.level)}</span>}
+      <span className="text-muted">Next 3 months</span><OutlookChip direction={o.direction} chance={o.chance} />
+      {o.six_months && <><span className="text-muted">· 6 months</span><OutlookChip direction={o.six_months.direction} /></>}
     </div>
   );
 }

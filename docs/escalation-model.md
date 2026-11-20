@@ -1,4 +1,4 @@
-# Escalation model: "will this country's crisis get worse?"
+# Outlook models: "will this country get better or worse?"
 
 Replaces the earlier conflict-onset model (removed), so the model answers the same question the site shows.
 
@@ -55,6 +55,34 @@ inflation, current level, violent news, income, resource rents, unemployment.
   enough to cross into Moderate. The reasons on each row show this.
 - Escalation of an existing crisis is harder to predict (ROC 0.73–0.80) than a new crisis (0.92).
 - Model selection used the same test years, so the numbers are slightly optimistic.
+
+## The "getting better" models (crisis_calming_3m / _6m)
+Same data, factors and method, opposite question: label `better_{h}m` = 1 when the next `h` months, scaled to a year,
+put the country at least one level **lower**. Only countries at Moderate or above (12,922 / 12,808 training rows;
+4,070 / 3,537 got better).
+
+| | 3 months | 6 months |
+|---|---|---|
+| ROC-AUC | **0.859** | **0.849** |
+| PR-AUC (base rate 24% / 20%) | 0.633 | 0.568 |
+| Rule: recent trend of deaths, ROC-AUC | 0.641 | 0.631 |
+| Moderate / High / Critical, ROC-AUC | 0.87 / 0.86 / 0.83 | 0.87 / 0.85 / 0.75 |
+
+## One outlook per country
+For each window the site shows **could get worse**, **could get better** or **likely to stay the same**:
+
+- "worse" when the worse-model probability passes its threshold, "better" likewise; when both pass, the stronger one
+  relative to its threshold wins; otherwise "same".
+- Thresholds = best F1 on the out-of-time test predictions:
+  - Worse: 0.15 (3 months) / 0.18 (6 months). Precision 26% / 28%, recall 50% / 39%.
+  - Better: 0.27 / 0.26. Precision 54% / 50%, recall 75% / 71%.
+- "Could get worse" is a warning, not a forecast: about 1 in 4 flagged countries really moved up a level within the
+  window (against 1 in 30 on average).
+
+Examples (data through Sep 2026):
+- **Iran:** Critical, could get better. Its deaths were concentrated in January 2026 (≈19,900); about 50 a month since May.
+- **Sudan:** Critical, could get better. ≈61,000 deaths in October 2025; ≈300 a month since.
+- **Ukraine:** stays Critical. A steady 5,000–7,000 deaths a month.
 
 ## Commands
 ```bash

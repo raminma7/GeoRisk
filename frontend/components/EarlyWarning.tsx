@@ -1,8 +1,7 @@
 "use client";
 
-/* Early-warning (experimental ML) UI building blocks. Risk is shown as "× the average country" — a relative
-   number people read easily — never as a "chance of war". Levels use the reserved status colors and always carry
-   an icon + text label. Choropleth uses one sequential hue (blue), light→dark. */
+/* Early-warning (ML) UI building blocks: the outlook per country (could get worse / could get better / likely to
+   stay the same). Colours are the reserved status colours and always come with an arrow and a text label. */
 
 import Link from "next/link";
 
@@ -24,20 +23,6 @@ export const LEVEL_META: Record<Level, { label: string; icon: string; chip: stri
   elevated: { label: "Elevated", icon: "◆", chip: "bg-warn/15 text-[rgb(150_95_0)] dark:text-warn ring-warn/40", bar: "bg-warn", dot: "bg-warn" },
   low: { label: "Low", icon: "●", chip: "bg-line/50 text-ink2 ring-line", bar: "bg-ink2/40", dot: "bg-ink2/50" },
 };
-
-// Sequential blue ramp (reference palette steps 150 → 650) for the risk map.
-export const RISK_RAMP = [
-  { min: 10, color: "#104281", label: "≥10× average" },
-  { min: 4, color: "#256abf", label: "4–10×" },
-  { min: 1.5, color: "#6da7ec", label: "1.5–4×" },
-  { min: 0, color: "#b7d3f6", label: "below 1.5×" },
-];
-export const ONGOING_COLOR = "#8f8e88";
-
-export function riskColor(timesAvg: number | null): string {
-  if (timesAvg === null) return ONGOING_COLOR;
-  return (RISK_RAMP.find((r) => timesAvg >= r.min) || RISK_RAMP[RISK_RAMP.length - 1]).color;
-}
 
 export function monthRange(w: { start: string; end: string }): string {
   const s = new Date(w.start + "T00:00:00Z"), e = new Date(w.end + "T00:00:00Z");
@@ -68,17 +53,12 @@ export function TimesAverage({ value, big = false }: { value: number | null; big
   );
 }
 
-export function RiskBar({ value, max, level }: { value: number; max: number; level: Level | null }) {
-  const pct = Math.max(3, Math.min(100, (Math.log1p(value) / Math.log1p(Math.max(max, 1))) * 100));
-  return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-line/60" role="img" aria-label={`${value.toFixed(1)} times average risk`}>
-      <div className={`h-full rounded-full ${level ? LEVEL_META[level].bar : "bg-ink2/40"}`} style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
-
-export function ReasonList({ reasons, max = 3, compact = false }: { reasons: Reason[]; max?: number; compact?: boolean }) {
+/* Factors behind a prediction. Red = pushes towards things getting worse, green = towards better. For the
+   "could get better" model a factor that raises the chance is good news, so the colours swap (`towardsBetter`). */
+export function ReasonList({ reasons, max = 3, compact = false, towardsBetter = false }: { reasons: Reason[]; max?: number;
+  compact?: boolean; towardsBetter?: boolean }) {
   const shown = reasons.slice(0, max);
+  const bad = (r: Reason) => (r.direction === "raises") !== towardsBetter;
   if (!shown.length) return <p className="text-xs text-muted">No factor explanation available.</p>;
   return (
     <ul className={compact ? "flex flex-wrap gap-1.5" : "space-y-1.5"}>
@@ -88,14 +68,14 @@ export function ReasonList({ reasons, max = 3, compact = false }: { reasons: Rea
           : "flex items-center justify-between gap-3 text-sm"}>
           {compact ? (
             <>
-              <span aria-hidden className={r.direction === "raises" ? "text-crit" : "text-good"}>{r.direction === "raises" ? "↑" : "↓"}</span>
+              <span aria-hidden className={bad(r) ? "text-crit" : "text-good"}>{r.direction === "raises" ? "↑" : "↓"}</span>
               <span className="text-ink2">{r.label}</span>
               <span className="font-medium tabular-nums">{r.value}</span>
             </>
           ) : (
             <>
               <span className="flex items-center gap-2 text-ink2">
-                <span aria-hidden className={`grid h-5 w-5 place-items-center rounded-full text-xs ${r.direction === "raises" ? "bg-crit/12 text-crit" : "bg-good/12 text-good"}`}>
+                <span aria-hidden className={`grid h-5 w-5 place-items-center rounded-full text-xs ${bad(r) ? "bg-crit/12 text-crit" : "bg-good/12 text-good"}`}>
                   {r.direction === "raises" ? "↑" : "↓"}
                 </span>
                 {r.label}
@@ -109,47 +89,6 @@ export function ReasonList({ reasons, max = 3, compact = false }: { reasons: Rea
   );
 }
 
-/* Semicircle gauge on a log scale from 0.1× to 20× the average country. */
-export function RiskGauge({ value, level }: { value: number; level: Level | null }) {
-  const lo = Math.log(0.1), hi = Math.log(20);
-  const t = Math.max(0, Math.min(1, (Math.log(Math.max(value, 0.1)) - lo) / (hi - lo)));
-  const angle = Math.PI * (1 - t);
-  const r = 70, cx = 90, cy = 85;
-  const x = cx + r * Math.cos(angle), y = cy - r * Math.sin(angle);
-  const arc = (a0: number, a1: number) => {
-    const p0 = [cx + r * Math.cos(Math.PI * (1 - a0)), cy - r * Math.sin(Math.PI * (1 - a0))];
-    const p1 = [cx + r * Math.cos(Math.PI * (1 - a1)), cy - r * Math.sin(Math.PI * (1 - a1))];
-    return `M ${p0[0]} ${p0[1]} A ${r} ${r} 0 0 1 ${p1[0]} ${p1[1]}`;
-  };
-  const stop = (v: number) => (Math.log(v) - lo) / (hi - lo);
-  const segs: [number, number, string][] = [[0, stop(1.5), "rgb(var(--line))"], [stop(1.5), stop(4), "rgb(var(--warn))"],
-    [stop(4), stop(10), "rgb(var(--serious))"], [stop(10), 1, "rgb(var(--crit))"]];
-  return (
-    <svg viewBox="0 0 180 100" className="w-full max-w-[220px]" role="img" aria-label={`Risk gauge: ${value.toFixed(1)} times the average country`}>
-      {segs.map(([a, b, c], i) => <path key={i} d={arc(a, b - 0.004)} stroke={c} strokeWidth={12} fill="none" strokeLinecap="butt" />)}
-      <line x1={cx} y1={cy} x2={x} y2={y} stroke="rgb(var(--ink))" strokeWidth={3} strokeLinecap="round" />
-      <circle cx={cx} cy={cy} r={5} fill="rgb(var(--ink))" />
-      <text x={20} y={98} fontSize={9} fill="rgb(var(--muted))">low</text>
-      <text x={147} y={98} fontSize={9} fill="rgb(var(--muted))">very high</text>
-      {level && <title>{LEVEL_META[level].label}</title>}
-    </svg>
-  );
-}
-
-export function Sparkline({ points }: { points: { window_start: string; times_average: number | null }[] }) {
-  const pts = points.filter((p) => p.times_average !== null) as { window_start: string; times_average: number }[];
-  if (pts.length < 2) return <p className="text-xs text-muted">Trend appears after the next monthly update.</p>;
-  const w = 220, h = 44, max = Math.max(...pts.map((p) => p.times_average), 1);
-  const xs = pts.map((_, i) => (i / (pts.length - 1)) * (w - 8) + 4);
-  const ys = pts.map((p) => h - 4 - (p.times_average / max) * (h - 8));
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-11 w-full" role="img" aria-label="Monthly risk trend">
-      <polyline points={xs.map((x, i) => `${x},${ys[i]}`).join(" ")} fill="none" stroke="var(--series-1)" strokeWidth={2} />
-      <circle cx={xs[xs.length - 1]} cy={ys[ys.length - 1]} r={4} fill="var(--series-1)" stroke="var(--chart-surface)" strokeWidth={2} />
-    </svg>
-  );
-}
-
 export function ExperimentalBadge() {
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent ring-1 ring-inset ring-accent/25"
@@ -159,72 +98,60 @@ export function ExperimentalBadge() {
   );
 }
 
-export const TIER_LABEL: Record<string, string> = { low: "Low", elevated: "Moderate", high: "High", critical: "Critical" };
+export type Direction = "worse" | "better" | "same";
+export const OUTLOOK: Record<Direction, { label: string; icon: string; chip: string; fill: string }> = {
+  worse: { label: "Could get worse", icon: "↗", chip: "bg-crit/12 text-crit ring-crit/30", fill: "#d03b3b" },
+  better: { label: "Could get better", icon: "↘", chip: "bg-good/12 text-good ring-good/30", fill: "#0ca30c" },
+  same: { label: "Likely to stay the same", icon: "→", chip: "bg-line/50 text-ink2 ring-line", fill: "#c9c8c1" },
+};
 
-export function CountryRiskRow({ p, max, maxReasons = 3 }: { p: Prediction; max: number; maxReasons?: number }) {
+/* Outlook chip: direction (with arrow + text) and, for worse / better, the model's chance in %. */
+export function OutlookChip({ direction, chance, size = "sm" }: { direction: Direction; chance?: number | null; size?: "sm" | "md" }) {
+  const o = OUTLOOK[direction];
   return (
-    <Link href={`/geopolitics/countries/${p.iso3}`}
-      className="group grid grid-cols-[2.5rem_1fr] gap-x-3 gap-y-2 rounded-xl px-3 py-3 transition hover:bg-accent/5 md:grid-cols-[2.5rem_14rem_1fr_10rem]">
-      <div className="row-span-2 text-lg font-semibold tabular-nums text-muted md:row-span-1">#{p.rank}</div>
-      <div className="min-w-0">
-        <div className="truncate font-medium group-hover:text-accent">{p.name || p.iso3}</div>
-        <div className="truncate text-xs text-muted">{p.current_tier ? `Now: ${TIER_LABEL[p.current_tier] || p.current_tier}` : p.region || p.iso3}
-          {p.six_months?.times_average != null && <> · 6 months: {p.six_months.times_average.toFixed(1)}×</>}</div>
-      </div>
-      <div className="col-start-2 min-w-0 md:col-start-auto"><ReasonList reasons={p.reasons} max={maxReasons} compact /></div>
-      <div className="col-start-2 flex items-center gap-3 md:col-start-auto md:flex-col md:items-end md:gap-1.5">
-        <div className="flex items-center gap-2"><TimesAverage value={p.times_average} /><LevelChip level={p.level} /></div>
-        <div className="w-28 md:w-full"><RiskBar value={p.times_average || 0} max={max} level={p.level} /></div>
-      </div>
-    </Link>
+    <span className={`inline-flex items-center gap-1 rounded-full font-medium ring-1 ring-inset ${o.chip} ${size === "md" ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-xs"}`}>
+      <span aria-hidden>{o.icon}</span>{direction === "same" ? "Same" : direction === "worse" ? "Worse" : "Better"}
+      {direction !== "same" && chance != null && <span className="font-normal opacity-80">· {Math.round(chance * 100)}%</span>}
+    </span>
   );
 }
 
+export const TIER_LABEL: Record<string, string> = { low: "Low", elevated: "Moderate", high: "High", critical: "Critical" };
 
-export function CountryRiskCard({ risk }: { risk: (Prediction & { history: { window_start: string; times_average: number | null }[];
-  explainer: { caveat: string } }) | null }) {
-  if (!risk) return null;
-  if (risk.status === "top_tier") {
-    return (
-      <section className="rounded-2xl border border-line bg-surface p-5">
-        <div className="flex flex-wrap items-center gap-2"><h2 className="h2">Could it get worse?</h2><ExperimentalBadge /></div>
-        <p className="mt-2 text-sm text-ink2">This country is already at the highest severity level (10,000+ deaths a year), so the
-          model does not score it. Its situation is tracked by live monitoring above.</p>
-      </section>
-    );
-  }
+type CountryOutlook = { direction: Direction; label: string; chance: number | null; reasons: Reason[];
+  window: { start: string; end: string } | null };
+
+export function CountryRiskCard({ risk }: { risk: (Prediction & { outlook?: CountryOutlook | null;
+  outlook_6m?: CountryOutlook | null; explainer: { caveat: string } }) | null }) {
+  const o = risk?.outlook;
+  if (!risk || !o) return null;
+  const six = risk.outlook_6m;
   return (
     <section className="rounded-2xl border border-line bg-surface p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2"><h2 className="h2">Could it get worse?</h2><ExperimentalBadge /></div>
-        <Link href="/early-warning" className="link text-xs">Compare all countries →</Link>
+        <div className="flex flex-wrap items-center gap-2"><h2 className="h2">Better or worse?</h2><ExperimentalBadge /></div>
+        <Link href="/early-warning" className="link text-xs">All countries →</Link>
       </div>
-      <div className="mt-4 grid gap-6 md:grid-cols-[220px_1fr]">
-        <div className="flex flex-col items-center text-center">
-          <RiskGauge value={risk.times_average || 0} level={risk.level} />
-          <TimesAverage value={risk.times_average} big />
-          <div className="mt-1 flex items-center gap-2"><LevelChip level={risk.level} size="md" /></div>
-          <div className="mt-2 text-xs text-muted">Risk of moving up a severity level · {monthRange(risk.window)}</div>
-          <div className="text-xs text-muted">Rank #{risk.rank} of {risk.out_of} countries
-            {risk.current_tier && <> · now {TIER_LABEL[risk.current_tier] || risk.current_tier}</>}</div>
-          {risk.six_months?.times_average != null && (
-            <div className="mt-2 rounded-lg bg-raised px-3 py-1.5 text-xs ring-1 ring-inset ring-line">
-              Next 6 months: <b>{risk.six_months.times_average.toFixed(1)}×</b> average {risk.six_months.level && <LevelChip level={risk.six_months.level} />}
-            </div>
-          )}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="rounded-xl bg-raised p-4 ring-1 ring-inset ring-line">
+          <div className="text-xs text-muted">Next 3 months{o.window ? ` · ${monthRange(o.window)}` : ""}</div>
+          <div className="mt-2"><OutlookChip direction={o.direction} chance={o.chance} size="md" /></div>
+          <div className="mt-1 text-sm font-medium">{o.label}</div>
         </div>
-        <div className="space-y-4">
-          <div>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Why</h3>
-            <ReasonList reasons={risk.reasons} max={5} />
+        {six && (
+          <div className="rounded-xl bg-raised p-4 ring-1 ring-inset ring-line">
+            <div className="text-xs text-muted">Next 6 months{six.window ? ` · ${monthRange(six.window)}` : ""}</div>
+            <div className="mt-2"><OutlookChip direction={six.direction} chance={six.chance} size="md" /></div>
+            <div className="mt-1 text-sm font-medium">{six.label}</div>
           </div>
-          <div>
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Monthly trend</h3>
-            <Sparkline points={risk.history} />
-          </div>
-          <p className="text-xs text-muted">{risk.explainer.caveat}</p>
-        </div>
+        )}
       </div>
+      {o.direction !== "same" && o.reasons.length > 0 && (
+        <div className="mt-4">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Why</h3>
+          <ReasonList reasons={o.reasons} max={3} towardsBetter={o.direction === "better"} />
+        </div>
+      )}
     </section>
   );
 }

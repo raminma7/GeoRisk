@@ -24,7 +24,8 @@ from app.ml.explain import reason
 from app.ml.models import MlPrediction
 
 log = get_logger(__name__)
-MODELS = {3: "crisis_escalation_3m", 6: "crisis_escalation_6m"}
+MODELS = {3: "crisis_escalation_3m", 6: "crisis_escalation_6m"}          # could it get worse?
+CALM_MODELS = {3: "crisis_calming_3m", 6: "crisis_calming_6m"}          # could it get better?
 MODEL = MODELS[3]  # the primary model shown on the site
 LEVELS = [(10.0, "very_high"), (4.0, "high"), (1.5, "elevated"), (0.0, "low")]
 
@@ -67,19 +68,26 @@ def run_predictions(session: Session) -> dict:
     rows["tier_now"] = rows["tier_now"].fillna(0).astype(int)
     data_through = (t0 - pd.DateOffset(months=1)).date()
     infos, summary = {}, {}
-    for h, name in MODELS.items():
-        info = model_info(name)
-        infos[name] = info
-        summary[name] = _predict_one(session, name, info, rows, t0, h, data_through, TIER_NAMES)
+    for kind, models in (("worse", MODELS), ("better", CALM_MODELS)):
+        for h, name in models.items():
+            info = model_info(name)
+            infos[name] = info
+            summary[name] = _predict_one(session, name, info, rows, t0, h, data_through, TIER_NAMES, kind)
     _store_model_info(session, infos)
     session.flush()
     return {"window_start": str(t0.date()), "data_through": str(data_through), "models": summary, "provenance": prov}
 
 
-def _predict_one(session: Session, name: str, info: dict, rows: pd.DataFrame, t0, h: int, data_through, tiers) -> dict:
+def _predict_one(session: Session, name: str, info: dict, rows: pd.DataFrame, t0, h: int, data_through, tiers,
+                 kind: str = "worse") -> dict:
     feats: list[str] = info["features"]
     window_end = (t0 + pd.DateOffset(months=h - 1)).date()
-    eligible = rows[rows["tier_now"] < len(tiers) - 1]          # already Critical: cannot get worse
+    if kind == "worse":
+        eligible = rows[rows["tier_now"] < len(tiers) - 1]      # already Critical: cannot get worse
+        other_status, other_tier = "top_tier", tiers[-1]
+    else:
+        eligible = rows[rows["tier_now"] > 0]                   # already Low: cannot get better
+        other_status, other_tier = "bottom_tier", tiers[0]
     payload_rows = [{"id": r["iso3"], **{f: (None if pd.isna(r[f]) else float(r[f])) for f in feats}}
                     for _, r in eligible.iterrows()]
     preds, version = [], info["version"]
@@ -109,7 +117,7 @@ def _predict_one(session: Session, name: str, info: dict, rows: pd.DataFrame, t0
         ))
     for iso in sorted(set(rows["iso3"]) - set(eligible["iso3"])):
         values.append(dict(model_name=name, model_version=version, iso3=iso, window_start=t0.date(), window_end=window_end,
-                           data_through=data_through, status="top_tier", current_tier=tiers[-1], probability=None,
+                           data_through=data_through, status=other_status, current_tier=other_tier, probability=None,
                            raw_score=None, rank=None, out_of=len(preds), times_average=None, level=None, reasons=[],
                            created_at=now))
     session.execute(delete(MlPrediction).where(MlPrediction.model_name == name, MlPrediction.model_version == version,
@@ -129,7 +137,7 @@ def _store_model_info(session: Session, infos: dict[str, dict]) -> None:
 
     keep = {name: {k: info.get(k) for k in ("name", "version", "label_definition", "applies_to", "prediction_window",
                                             "trained_at", "test", "provenance", "disclaimer", "algorithm",
-                                            "horizon_months", "top_features")}
+                                            "horizon_months", "top_features", "direction", "decision_threshold")}
             for name, info in infos.items()}
     row = session.get(AppSetting, "ml_model_info")
     if row is None:
@@ -171,6 +179,50 @@ def _watchlist_alerts(session: Session, values: list[dict]) -> None:
 
 
 # ------------------------------------------------------------------ reads
+OUTLOOK_LABELS = {"worse": "Could get worse", "better": "Could get better", "same": "Likely to stay the same"}
+
+
+def outlook(worse: MlPrediction | None, better: MlPrediction | None, t_worse: float, t_better: float) -> dict:
+    """One direction per country from the two models: 'worse' / 'better' when that model's probability passes its
+    decision threshold (chosen on test years; when both pass, the stronger one relative to its threshold), else
+    'same'. ``chance`` is the probability of the chosen direction (for 'same': of neither happening)."""
+    pw = worse.probability if worse is not None and worse.probability is not None else None
+    pb = better.probability if better is not None and better.probability is not None else None
+    sw = pw / t_worse if pw is not None and t_worse else 0
+    sb = pb / t_better if pb is not None and t_better else 0
+    if sw >= 1 and sw >= sb:
+        d, chance = "worse", pw
+    elif sb >= 1:
+        d, chance = "better", pb
+    else:
+        d, chance = "same", max(0.0, 1 - (pw or 0) - (pb or 0))
+    return {"direction": d, "label": OUTLOOK_LABELS[d], "chance": round(chance, 3) if chance is not None else None,
+            "p_worse": pw, "p_better": pb}
+
+
+def outlooks(session: Session, h: int = 3) -> dict[str, dict]:
+    """Latest outlook (worse / better / same) for every country, for the 3- or 6-month window."""
+    out: dict[str, dict] = {}
+    rows: dict[str, dict[str, MlPrediction]] = {}
+    window = None
+    for kind, name in (("worse", MODELS[h]), ("better", CALM_MODELS[h])):
+        lw = latest_window(session, name)
+        if not lw:
+            continue
+        for p in session.scalars(select(MlPrediction).where(MlPrediction.model_name == name, MlPrediction.model_version == lw[0],
+                                                            MlPrediction.window_start == lw[1])):
+            rows.setdefault(p.iso3, {})[kind] = p
+            window = {"start": p.window_start.isoformat(), "end": p.window_end.isoformat()}
+    tw = stored_model_info(session, MODELS[h]).get("decision_threshold") or 0.15
+    tb = stored_model_info(session, CALM_MODELS[h]).get("decision_threshold") or 0.27
+    for iso3, r in rows.items():
+        w, b = r.get("worse"), r.get("better")
+        o = outlook(w, b, tw, tb)
+        main = w if o["direction"] == "worse" else b if o["direction"] == "better" else None
+        o.update(current_tier=(w or b).current_tier if (w or b) else None, window=window,
+                 reasons=(main.reasons if main is not None else [])[:3])
+        out[iso3] = o
+    return out
 def latest_window(session: Session, name: str = MODEL) -> tuple[str, object] | None:
     row = session.execute(select(MlPrediction.model_version, MlPrediction.window_start)
                           .where(MlPrediction.model_name == name)

@@ -1,7 +1,7 @@
 {
-  "name": "crisis_escalation_6m",
-  "version": "v20261120-d0571eba",
-  "trained_at": "2026-11-20T15:24:42.459435+00:00",
+  "name": "crisis_calming_6m",
+  "version": "v20261120-89218e63",
+  "trained_at": "2026-11-20T15:47:25.679953+00:00",
   "horizon_months": 6,
   "features": [
     "sb_events_l1",
@@ -58,15 +58,17 @@
     "news_protest_share",
     "news_diplomatic_tension_share"
   ],
-  "label": "worse_6m",
-  "label_definition": "Deaths from organised violence (UCDP, all types) in the next 6 months, scaled to a year, put the country at least one severity tier above its tier over the previous 12 months (tiers: <100, 100-999, 1,000-9,999, 10,000+ deaths per year). Countries already at the top tier are excluded.",
-  "applies_to": "Every country except those already at the top tier (10,000+ deaths a year)",
+  "label": "better_6m",
+  "direction": "better",
+  "label_definition": "Deaths from organised violence (UCDP, all types) in the next 6 months, scaled to a year, put the country at least one severity tier below its tier over the previous 12 months. Only countries at Moderate or above.",
+  "applies_to": "Countries at Moderate or above (100+ deaths a year)",
+  "decision_threshold": 0.26,
   "prediction_window": "the 6 months after the data ends",
-  "training_rows": 76470,
-  "training_positives": 2754,
-  "base_rate": 0.03601412318556296,
+  "training_rows": 12808,
+  "training_positives": 3537,
+  "base_rate": 0.27615552779512803,
   "algorithm": "lightgbm (depth-3, regularised) + Platt calibration on out-of-time scores",
-  "data_checksum": "d0571eba70eebc17a29b1908917380978a54f72b49576f1b83d4b2ca29da4953",
+  "data_checksum": "89218e6346093b69f2c9952008a3106c60f5e4727d43097c763afda97e0e4db8",
   "provenance": {
     "ucdp_official": "26.1",
     "ucdp_candidate": "candidate-v26_01_26_09",
@@ -79,132 +81,138 @@
       2025
     ],
     "model": {
-      "n": 27156,
-      "positives": 911,
-      "base_rate": 0.0335,
-      "roc_auc": 0.902,
-      "pr_auc": 0.265,
-      "top20_caught": 0.643
+      "n": 4774,
+      "positives": 972,
+      "base_rate": 0.2036,
+      "roc_auc": 0.849,
+      "pr_auc": 0.568,
+      "top20_caught": 0.962
     },
     "rule_deaths_trend": {
-      "n": 27156,
-      "positives": 911,
-      "base_rate": 0.0335,
-      "roc_auc": 0.539,
-      "pr_auc": 0.091,
-      "top20_caught": 0.437
+      "n": 4774,
+      "positives": 972,
+      "base_rate": 0.2036,
+      "roc_auc": 0.631,
+      "pr_auc": 0.44,
+      "top20_caught": 0.714
     },
     "rule_violent_news": {
-      "n": 27156,
-      "positives": 911,
-      "base_rate": 0.0335,
-      "roc_auc": 0.537,
-      "pr_auc": 0.037,
-      "top20_caught": 0.137
+      "n": 4774,
+      "positives": 972,
+      "base_rate": 0.2036,
+      "roc_auc": 0.538,
+      "pr_auc": 0.234,
+      "top20_caught": 0.678
     },
     "model_by_current_tier": {
-      "low": {
-        "n": 22838,
-        "positives": 503,
-        "base_rate": 0.022,
-        "roc_auc": 0.921,
-        "pr_auc": 0.23
-      },
       "elevated": {
         "n": 2642,
-        "positives": 309,
-        "base_rate": 0.117,
-        "roc_auc": 0.762,
-        "pr_auc": 0.353
+        "positives": 503,
+        "base_rate": 0.1904,
+        "roc_auc": 0.869,
+        "pr_auc": 0.582
       },
       "high": {
         "n": 1676,
-        "positives": 99,
-        "base_rate": 0.0591,
-        "roc_auc": 0.73,
-        "pr_auc": 0.179
+        "positives": 351,
+        "base_rate": 0.2094,
+        "roc_auc": 0.846,
+        "pr_auc": 0.54
+      },
+      "critical": {
+        "n": 456,
+        "positives": 118,
+        "base_rate": 0.2588,
+        "roc_auc": 0.754,
+        "pr_auc": 0.577
       }
+    },
+    "decision": {
+      "threshold": 0.26,
+      "f1": 0.588,
+      "precision": 0.503,
+      "recall": 0.71
     }
   },
   "top_features": [
     [
-      "all_deaths_l12",
-      0.4733
-    ],
-    [
-      "all_deaths_l3",
-      0.0691
+      "deaths_trend_3v9",
+      0.1946
     ],
     [
       "all_deaths_l1",
-      0.0434
+      0.1358
+    ],
+    [
+      "all_deaths_l12",
+      0.1301
     ],
     [
       "tier_now",
-      0.0428
+      0.0924
     ],
     [
-      "wdi_pop_age_0_14_pct",
-      0.0331
+      "sb_events_l1",
+      0.0495
     ],
     [
-      "wdi_log_population",
+      "all_deaths_l3",
+      0.0364
+    ],
+    [
+      "sb_active_months_l12",
       0.0325
     ],
     [
-      "wdi_inflation_pct",
-      0.022
+      "ns_events_l12",
+      0.0282
     ],
     [
-      "vdem_liberal_democracy",
-      0.0219
+      "wdi_log_population",
+      0.0262
     ],
     [
-      "deaths_trend_3v9",
-      0.0218
-    ],
-    [
-      "wdi_natural_resource_rents_pct_gdp",
-      0.0217
-    ],
-    [
-      "nb_sb_deaths_l12",
-      0.0188
-    ],
-    [
-      "wdi_unemployment_pct",
-      0.0186
-    ],
-    [
-      "news_violent_share",
-      0.0156
-    ],
-    [
-      "epr_relevant_groups",
-      0.0144
+      "os_events_l3",
+      0.0235
     ],
     [
       "wdi_log_gdp_per_capita",
-      0.0143
+      0.0178
     ],
     [
-      "vdem_electoral_democracy_change",
-      0.0142
-    ],
-    [
-      "months_since_sb",
-      0.0124
+      "sb_events_l3",
+      0.0176
     ],
     [
       "wdi_gdp_growth_pct",
-      0.012
+      0.0175
     ],
     [
-      "region_sb_events_l12",
+      "vdem_liberal_democracy",
+      0.0171
+    ],
+    [
+      "wdi_pop_age_0_14_pct",
+      0.0135
+    ],
+    [
+      "sb_deaths_l12",
+      0.013
+    ],
+    [
+      "wdi_natural_resource_rents_pct_gdp",
       0.0118
     ],
     [
-      "epr_excluded_pop_share",
+      "wdi_unemployment_pct",
+      0.0114
+    ],
+    [
+      "region_sb_events_l12",
+      0.0109
+    ],
+    [
+      "wdi_inflation_pct",
       0.0102
     ]
   ],

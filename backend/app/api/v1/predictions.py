@@ -17,16 +17,15 @@ from app.registry.models import Country, Region
 router = APIRouter(prefix="/predictions", tags=["Early warning (ML)"])
 
 EXPLAINER = {
-    "question": "Will this country's situation get worse in the next 3 months, i.e. move up at least one severity "
-                "level (Low → Moderate → High → Critical, by deaths from organised violence)? For a calm country "
-                "that means a new crisis; for a country in crisis, escalation.",
+    "question": "Will this country's situation get worse, better, or stay the same in the next 3 and 6 months? "
+                "'Worse' / 'better' = moving at least one severity level up or down (Low, Moderate, High, Critical, "
+                "by deaths from organised violence).",
     "how": "A machine-learning model trained on 35 years of verified conflict data (UCDP, all kinds of organised "
            "violence) and on each country's recent trend, neighbours, politics, economy and news. A second model "
            "looks 6 months ahead.",
     "levels": {"very_high": "≥10× the average country", "high": "4–10× average", "elevated": "1.5–4× average",
                "low": "below 1.5× average"},
-    "caveat": "Research estimate based on historical patterns. Getting worse is rare: even high-risk countries "
-              "usually stay as they are. Countries already at Critical are not scored.",
+    "caveat": "Research estimate based on historical patterns, not a forecast of events.",
 }
 
 
@@ -84,40 +83,47 @@ def country_risk(session: Session, iso3: str) -> dict | None:
     if p is None:
         return None
     name = session.scalar(select(Country.name).where(Country.iso3 == iso3))
+    o3, o6 = P.outlooks(session, 3).get(iso3), P.outlooks(session, 6).get(iso3)
     return {**P.ser(p, name), "six_months": _six(latest_for(session, iso3, P.MODELS[6])),
-            "history": P.history(session, iso3), "explainer": EXPLAINER}
+            "outlook": o3, "outlook_6m": o6, "history": P.history(session, iso3), "explainer": EXPLAINER}
 
 
-@router.get("", summary="Countries ranked by modelled risk of getting worse in the next 3 months")
-def watch_list(limit: int = Query(50, ge=1, le=300), region: str | None = None, level: str | None = None,
-               group: str | None = Query(None, pattern="^(calm|crisis)$",
-                                         description="calm = currently Low (risk of a new crisis); crisis = Moderate/High"),
+DIRECTION_ORDER = {"worse": 0, "better": 1, "same": 2}
+TIER_ORDER = {"critical": 0, "high": 1, "elevated": 2, "low": 3}
+
+
+@router.get("", summary="Outlook for every country: could get worse, could get better, or likely to stay the same")
+def watch_list(limit: int = Query(300, ge=1, le=300), region: str | None = None,
+               direction: str | None = Query(None, pattern="^(worse|better|same)$"),
                s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     meta = _meta(s)
     if meta is None:
-        return {"meta": None, "items": [], "already_critical": [], "setup": P.setup_status(s),
+        return {"meta": None, "items": [], "counts": {}, "setup": P.setup_status(s),
                 "setup_steps": [{"id": k, "label": P.STEP_LABELS[k]} for k in P.STEPS],
                 "message": "The early-warning model is being set up. In Docker this starts automatically; manually: "
                            "`python -m app.cli setup-early-warning`."}
-    lw = P.latest_window(s)
-    q = (select(MlPrediction, Country.name, Region.name)
-         .join(Country, Country.iso3 == MlPrediction.iso3).outerjoin(Region, Region.id == Country.subregion_id)
-         .where(MlPrediction.model_name == P.MODEL, MlPrediction.model_version == lw[0], MlPrediction.window_start == lw[1]))
-    if region:
-        q = q.where(MlPrediction.iso3.in_(region_iso3s(s, region)))
-    rows = s.execute(q).all()
-    predicted = sorted((r for r in rows if r[0].status == "predicted"), key=lambda r: r[0].rank)
-    if level:
-        predicted = [r for r in predicted if r[0].level == level]
-    if group == "calm":
-        predicted = [r for r in predicted if r[0].current_tier == "low"]
-    elif group == "crisis":
-        predicted = [r for r in predicted if r[0].current_tier in ("elevated", "high")]
-    top = sorted((r for r in rows if r[0].status == "top_tier"), key=lambda r: r[1])
-    six = six_months(s)
-    return {"meta": meta,
-            "items": [{**P.ser(p, n), "region": rg, "six_months": _six(six.get(p.iso3))} for p, n, rg in predicted[:limit]],
-            "already_critical": [{"iso3": p.iso3, "name": n} for p, n, _ in top], "total_predicted": len(predicted)}
+    o3, o6 = P.outlooks(s, 3), P.outlooks(s, 6)
+    names = dict(s.execute(select(Country.iso3, Country.name)).all())
+    regions = dict(s.execute(select(Country.iso3, Region.name).outerjoin(Region, Region.id == Country.subregion_id)).all())
+    keep = set(region_iso3s(s, region)) if region else None
+    items = []
+    for iso3, o in o3.items():
+        if keep is not None and iso3 not in keep:
+            continue
+        six = o6.get(iso3)
+        items.append({"iso3": iso3, "name": names.get(iso3, iso3), "region": regions.get(iso3),
+                      "current_tier": o["current_tier"], "direction": o["direction"], "label": o["label"],
+                      "chance": o["chance"], "reasons": o["reasons"],
+                      "six_months": {"direction": six["direction"], "label": six["label"], "chance": six["chance"]}
+                      if six else None})
+    counts = {d: sum(1 for x in items if x["direction"] == d) for d in DIRECTION_ORDER}
+    if direction:
+        items = [x for x in items if x["direction"] == direction]
+    # strongest signals first; 'same' sorted by how serious the situation is now
+    items.sort(key=lambda x: (DIRECTION_ORDER[x["direction"]],
+                              -(x["chance"] or 0) if x["direction"] != "same" else TIER_ORDER.get(x["current_tier"] or "low", 4),
+                              x["name"]))
+    return {"meta": meta, "counts": counts, "total": len(items), "items": items[:limit]}
 
 
 @router.get("/countries/{code}", summary="Model risk for one country, with monthly history")
