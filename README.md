@@ -72,7 +72,9 @@ Critical as the site) in the next 3 or 6 months. Each country gets one
 outlook per window: **could get worse**, **could get better** or **likely to stay the same** (a direction is shown
 when its probability passes a threshold chosen on the test years). Tested on 2013–2025 with models that never saw the
 test year: "worse" ROC-AUC 0.81 / 0.82, "better" 0.82 / 0.83 (simple trend rule: 0.31–0.45). Predictions start from
-today's index (news up to today). The outlook appears on the
+today's index (news up to today). Because verified deaths lag about two months, the outlook is compared with this
+week's news: when they disagree (e.g. "could get better" while fighting is picking up), the outlook is kept and a line
+says what history shows (sudden flare-ups of fighting news faded within 3 months in 64% of past cases). The outlook appears on the
 **Early warning** page (filters: all / worse / better / same), on every country card and on country pages. Details:
 [`docs/escalation-model.md`](docs/escalation-model.md).
 

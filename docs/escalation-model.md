@@ -8,6 +8,20 @@
 > inputs: the index now, violence, the 3-month change of the index, democracy, momentum, military activity,
 > tension news. The sections below describe the earlier, deaths-only version and its results.
 
+> **Short-term signals (tested, not used).** `backend/app/ml/daily_samples.py` builds weekly samples 2014–2026 from
+> the GDELT daily archive with the index as computed live and 7 / 14-day signals (fighting news vs the 90 days
+> before, tension, protests, attention). Same samples and labels, walk-forward 2016–2025:
+>
+> | | without short-term | with short-term |
+> |---|---|---|
+> | worse 3 / 6 months (ROC) | 0.804 / 0.809 | 0.804 / 0.810 |
+> | better 3 / 6 months (ROC) | 0.804 / 0.814 | 0.807 / 0.817 |
+>
+> No real gain, so the models were not changed. What history shows instead: after a 2-week surge of fighting news
+> (≥1.5×), countries got **better** within 3 months in 64% of cases (35% normally) and worse in 5% (11% normally);
+> after a quiet spell (≤0.6×) they got worse in 21%. The site therefore keeps the model's outlook and, when this
+> week's trend disagrees, explains it with these numbers.
+
 Replaces the earlier conflict-onset model (removed), so the model answers the same question the site shows.
 
 ## Question (label)
