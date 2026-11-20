@@ -1,0 +1,2 @@
+# Model packages must stay byte-identical on every OS (no CRLF conversion on Windows)
+model-service/models/** -text
