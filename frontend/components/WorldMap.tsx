@@ -99,8 +99,8 @@ export default function WorldMap({ crises = [], events, highlight = [], height =
           { id: "events", type: "circle", source: "events", paint: {
             "circle-radius": ["interpolate", ["linear"], ["get", "severity"], 0, 2.5, 1, 5],
             "circle-color": cssVar("--series-1", "#2a78d6"),
-            "circle-opacity": ["match", ["get", "verification_status"], "multi_source_reported", 0.75, 0.35],
-            "circle-stroke-width": 0 } },
+            "circle-opacity": 0.8,
+            "circle-stroke-color": cssVar("--chart-surface", "#fff"), "circle-stroke-width": 0.8 } },
           { id: "crises", type: "circle", source: "crises", paint: {
             "circle-radius": ["interpolate", ["linear"], ["get", "score"], 0, 6, 100, 18],
             "circle-color": LEVEL_COLOR as never, "circle-opacity": 0.85,
@@ -120,13 +120,13 @@ export default function WorldMap({ crises = [], events, highlight = [], height =
         if (!p) return;
         // Titles come from external news data: build DOM with textContent only (never innerHTML).
         const lines = layer === "crises"
-          ? [`Review priority ${Number(p.score).toFixed(1)} · ${p.level} · ${String(p.direction).replace("_", "-")}`]
-          : [`${p.date} · ${p.reports} reports · ${p.sources} outlets`, String(p.verification_status).replace(/_/g, " ")];
+          ? [`Severity: ${({ critical: "Critical", high: "High", elevated: "Moderate" } as Record<string, string>)[String(p.level)] || "Low"}`]
+          : [`${p.date} · reported by ${p.sources} outlet${Number(p.sources) === 1 ? "" : "s"}`];
         const div = document.createElement("div");
         div.style.fontSize = "12px";
         div.style.maxWidth = "260px";
         const strong = document.createElement("strong");
-        strong.textContent = String(p.title ?? "");
+        strong.textContent = String((layer === "events" ? p.text : null) ?? p.title ?? "");
         div.appendChild(strong);
         for (const l of lines) {
           const line = document.createElement("div");

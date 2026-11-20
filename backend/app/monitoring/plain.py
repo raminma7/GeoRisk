@@ -371,21 +371,10 @@ def recent_incidents(s: Session, crisis_id: int | None = None, hours: int = 72, 
          .order_by(desc(EventCluster.max_severity * func.least(func.cardinality(EventCluster.source_domains), 20)))
          .limit(limit * 4))
     rows = s.execute(q).all()
-    events = [ev for _, ev in rows if ev is not None]
-    actor_ids = {a for ev in events for a in (ev.actor1_id, ev.actor2_id) if a}
-    actors = {aid: (t, cid) for aid, t, cid in s.execute(
-        select(Actor.id, Actor.actor_type, Actor.country_id).where(Actor.id.in_(actor_ids))).all()} if actor_ids else {}
-    countries = {cid: (iso3, name) for cid, iso3, name in s.execute(select(Country.id, Country.iso3, Country.name)).all()}
-    by_iso3 = {iso3: name for iso3, name in countries.values()}
+    texts = incident_texts(s, rows)
     out, seen = [], set()
     for cl, ev in rows:
-        if ev is not None:
-            d = describe_event(ev, actors, countries)
-        else:  # no source-event detail: still say what happened and where
-            cname = by_iso3.get(cl.action_country_iso3 or "")
-            empty = {"kind": None, "iso3": None, "country": None, "igo": None}
-            d = {"a": empty, "b": empty, "place": cname, "place_iso3": cl.action_country_iso3, "place_country": cname}
-        text_ = incident_sentence(cl, d)
+        text_ = texts.get(cl.id)
         if text_ is None or text_ in seen:
             continue
         seen.add(text_)
@@ -394,6 +383,26 @@ def recent_incidents(s: Session, crisis_id: int | None = None, hours: int = 72, 
                     "source_url": ev.source_url if ev else None})
         if len(out) >= limit:
             break
+    return out
+
+
+def incident_texts(s: Session, rows: list) -> dict[int, str | None]:
+    """Readable sentence for each (EventCluster, representative NormalizedGeopoliticalEvent | None) pair."""
+    events = [ev for _, ev in rows if ev is not None]
+    actor_ids = {a for ev in events for a in (ev.actor1_id, ev.actor2_id) if a}
+    actors = {aid: (t, cid) for aid, t, cid in s.execute(
+        select(Actor.id, Actor.actor_type, Actor.country_id).where(Actor.id.in_(actor_ids))).all()} if actor_ids else {}
+    countries = {cid: (iso3, name) for cid, iso3, name in s.execute(select(Country.id, Country.iso3, Country.name)).all()}
+    by_iso3 = {iso3: name for iso3, name in countries.values()}
+    out: dict[int, str | None] = {}
+    for cl, ev in rows:
+        if ev is not None:
+            d = describe_event(ev, actors, countries)
+        else:  # no source-event detail: still say what happened and where
+            cname = by_iso3.get(cl.action_country_iso3 or "")
+            empty = {"kind": None, "iso3": None, "country": None, "igo": None}
+            d = {"a": empty, "b": empty, "place": cname, "place_iso3": cl.action_country_iso3, "place_country": cname}
+        out[cl.id] = incident_sentence(cl, d)
     return out
 
 
