@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { LevelChip, OutlookChip, monthRange, type Direction, type Prediction } from "@/components/EarlyWarning";
+import { LevelChip, OutlookChip, TIER_LABEL, monthRange, type Direction, type Prediction } from "@/components/EarlyWarning";
 import { ErrorBox, Loading } from "@/components/ui";
 import { useApi } from "@/lib/api";
 
@@ -24,7 +24,9 @@ export type CountryStory = {
   activity: Story["activity"]; situations: { id: number; headline: string; severity: Story["severity"] }[];
   also_involved: { iso3: string; name: string }[];
   outlook?: null | { direction: Direction; label: string; chance: number | null; window: { start: string; end: string } | null;
-    six_months: null | { direction: Direction; label: string } };
+    current_tier?: string | null; to_tier?: string | null;
+    six_months: null | { direction: Direction; label: string; to_tier?: string | null } };
+  index?: null | { score: number | null; dimensions: Record<string, number | null> };
 };
 type Today = {
   generated_at: string;
@@ -90,10 +92,39 @@ export function ActivityBars({ data, height = 28 }: { data: Story["activity"]; h
 /* The model's outlook on a country card: better / worse / same in the next 3 and 6 months. */
 function Outlook({ o }: { o: CountryStory["outlook"] }) {
   if (!o) return null;
+  const to = o.direction !== "same" && o.current_tier && o.to_tier
+    ? <span className="text-muted">({TIER_LABEL[o.current_tier]} → {TIER_LABEL[o.to_tier]})</span> : null;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-raised px-2.5 py-1.5 text-xs ring-1 ring-inset ring-line">
-      <span className="text-muted">Next 3 months</span><OutlookChip direction={o.direction} chance={o.chance} />
+      <span className="text-muted">Next 3 months</span><OutlookChip direction={o.direction} chance={o.chance} />{to}
       {o.six_months && <><span className="text-muted">· 6 months</span><OutlookChip direction={o.six_months.direction} /></>}
+    </div>
+  );
+}
+
+export const DIMENSION_LABELS: Record<string, string> = {
+  violence: "Violence", military: "Military", tension: "Tension", unrest: "Unrest", momentum: "Change",
+};
+
+/* The five parts of the crisis index as small bars (0-100, percentile vs history; Change: 50 = normal). */
+export function IndexBars({ index, large = false }: { index: CountryStory["index"]; large?: boolean }) {
+  if (!index) return null;
+  const dims = ["violence", "military", "tension", "unrest", "momentum"];
+  return (
+    <div className={`grid grid-cols-5 gap-2 ${large ? "" : "text-[10px]"}`} role="img"
+      aria-label={dims.map((k) => `${DIMENSION_LABELS[k]} ${index.dimensions[k] ?? "n/a"}`).join(", ")}>
+      {dims.map((k) => {
+        const v = index.dimensions[k];
+        const color = v == null ? "bg-line" : v >= 85 ? "bg-crit" : v >= 65 ? "bg-serious" : v >= 45 ? "bg-warn" : "bg-ink2/30";
+        return (
+          <div key={k} title={`${DIMENSION_LABELS[k]}: ${v == null ? "not enough news" : Math.round(v)}`}>
+            <div className={`${large ? "h-2" : "h-1.5"} w-full overflow-hidden rounded-full bg-line/60`}>
+              <div className={`h-full rounded-full ${color}`} style={{ width: `${v ?? 0}%` }} />
+            </div>
+            <div className={`mt-0.5 truncate text-muted ${large ? "text-xs" : ""}`}>{DIMENSION_LABELS[k]}{large && v != null && <b className="ml-1 text-ink">{Math.round(v)}</b>}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -114,6 +145,7 @@ export function CountryCard({ c }: { c: CountryStory }) {
       <ul className="space-y-1 text-sm text-ink2">
         {c.reasons.map((r) => <li key={r} className="flex gap-2"><span aria-hidden className="mt-2 h-1 w-1 shrink-0 rounded-full bg-muted" />{r}</li>)}
       </ul>
+      <IndexBars index={c.index} />
       <Outlook o={c.outlook} />
       {c.also_involved.length > 0 && (
         <p className="text-xs text-muted">

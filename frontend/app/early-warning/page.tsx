@@ -16,7 +16,8 @@ const WorldMap = dynamic(() => import("@/components/WorldMap"), { ssr: false, lo
 type Item = {
   iso3: string; name: string; region: string | null; current_tier: string | null; direction: Direction; label: string;
   chance: number | null; reasons: Reason[];
-  six_months: null | { direction: Direction; label: string; chance: number | null };
+  six_months: null | { direction: Direction; label: string; chance: number | null; to_tier?: string | null };
+  to_tier?: string | null;
 };
 
 type WatchList = {
@@ -170,7 +171,8 @@ export default function EarlyWarningPage() {
                   <div className="truncate text-xs text-muted">{p.region}</div>
                 </div>
                 <div>{p.current_tier && <SeverityChip s={{ level: p.current_tier, label: TIER_LABEL[p.current_tier] || p.current_tier }} />}</div>
-                <div><OutlookChip direction={p.direction} chance={p.chance} /></div>
+                <div><OutlookChip direction={p.direction} chance={p.chance} />
+                  {p.direction !== "same" && p.to_tier && <div className="mt-0.5 text-[11px] text-muted">→ {TIER_LABEL[p.to_tier]}</div>}</div>
                 <div className="col-span-2 md:col-span-1">{p.six_months && <span className="mr-1 text-xs text-muted md:hidden">6 months:</span>}
                   {p.six_months && <OutlookChip direction={p.six_months.direction} chance={p.six_months.chance} />}</div>
                 <div className="col-span-2 min-w-0 md:col-span-1">{p.direction !== "same" && <ReasonList reasons={p.reasons} max={2} compact towardsBetter={p.direction === "better"} />}</div>

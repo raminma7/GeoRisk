@@ -60,6 +60,14 @@ LABELS: dict[str, tuple[str, str]] = {
     "news_violent_vs_normal": ("Violent news vs this country's normal", "ratio"),
     "news_protest_share": ("Share of protest news", "pct_share"),
     "news_diplomatic_tension_share": ("Share of diplomatic-tension news", "pct_share"),
+    "idx_score": ("Crisis index now", "score100"),
+    "idx_level": ("Current level", "tier"),
+    "idx_violence": ("Violence (index part)", "score100"),
+    "idx_military": ("Military activity (index part)", "score100"),
+    "idx_tension": ("Tension (index part)", "score100"),
+    "idx_unrest": ("Unrest (index part)", "score100"),
+    "idx_momentum": ("Conflict news vs normal (index part)", "score100"),
+    "idx_score_chg_3m": ("Change of the crisis index in 3 months", "signed_int"),
 }
 TIERS = {0: "Low", 1: "Moderate", 2: "High", 3: "Critical"}
 REGIMES = {0: "Closed autocracy", 1: "Electoral autocracy", 2: "Electoral democracy", 3: "Liberal democracy"}
@@ -79,6 +87,8 @@ def format_value(feature: str, v: float | None) -> str:
         return f"{v:.2f} of 1"
     if kind == "signed_score":
         return f"{v:+.2f}"
+    if kind == "score100":
+        return f"{v:.0f} / 100"
     if kind == "tier":
         return TIERS.get(round(v), str(v))
     if kind == "ratio":

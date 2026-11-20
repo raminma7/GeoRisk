@@ -18,6 +18,7 @@ EDITABLE = {
     "watchlist": list,
     "priority_weights": dict,
     "priority_levels": dict,
+    "crisis_index_weights": dict,
     "alert_threshold_level": str,
     "crisis_attach_threshold": float,
     "crisis_review_threshold": float,

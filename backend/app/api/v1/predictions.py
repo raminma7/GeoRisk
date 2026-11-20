@@ -112,9 +112,11 @@ def watch_list(limit: int = Query(300, ge=1, le=300), region: str | None = None,
             continue
         six = o6.get(iso3)
         items.append({"iso3": iso3, "name": names.get(iso3, iso3), "region": regions.get(iso3),
-                      "current_tier": o["current_tier"], "direction": o["direction"], "label": o["label"],
+                      "current_tier": o["current_tier"], "to_tier": o["to_tier"], "direction": o["direction"],
+                      "label": o["label"],
                       "chance": o["chance"], "reasons": o["reasons"],
-                      "six_months": {"direction": six["direction"], "label": six["label"], "chance": six["chance"]}
+                      "six_months": {"direction": six["direction"], "label": six["label"], "chance": six["chance"],
+                                     "to_tier": six["to_tier"]}
                       if six else None})
     counts = {d: sum(1 for x in items if x["direction"] == d) for d in DIRECTION_ORDER}
     if direction:

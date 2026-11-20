@@ -65,7 +65,7 @@ def run_predictions(session: Session) -> dict:
     prov = df.attrs.get("provenance", {})
     t0 = df["month"].max()
     rows = df[df["month"] == t0].copy()
-    rows["tier_now"] = rows["tier_now"].fillna(0).astype(int)
+    rows = _with_live_index(session, df, rows, t0)
     data_through = (t0 - pd.DateOffset(months=1)).date()
     infos, summary = {}, {}
     for kind, models in (("worse", MODELS), ("better", CALM_MODELS)):
@@ -76,6 +76,29 @@ def run_predictions(session: Session) -> dict:
     _store_model_info(session, infos)
     session.flush()
     return {"window_start": str(t0.date()), "data_through": str(data_through), "models": summary, "provenance": prov}
+
+
+def _with_live_index(session: Session, df: pd.DataFrame, rows: pd.DataFrame, t0) -> pd.DataFrame:
+    """Use the crisis index as it is today (news of the last 30 days, not only up to the last UCDP month) for the
+    prediction rows, so the outlook starts from the same level the site shows."""
+    from app.ml import crisis_index as CI
+
+    live = CI.live(session)
+    rank = {"low": 0, "elevated": 1, "high": 2, "critical": 3}
+    before = df[df["month"] == t0 - pd.DateOffset(months=3)].set_index("iso3")["idx_score"]
+    rows = rows.set_index("iso3")
+    for iso, v in live.items():
+        if iso not in rows.index or v["score"] is None:
+            continue
+        rows.at[iso, "idx_score"] = v["score"]
+        rows.at[iso, "idx_level"] = rank[v["level"]]
+        for k, x in v["dimensions"].items():
+            rows.at[iso, f"idx_{k}"] = np.nan if x is None else x
+        if iso in before.index and pd.notna(before[iso]):
+            rows.at[iso, "idx_score_chg_3m"] = v["score"] - before[iso]
+    rows = rows.reset_index()
+    rows["tier_now"] = rows["idx_level"].fillna(0).astype(int)   # current level on the crisis index
+    return rows
 
 
 def _predict_one(session: Session, name: str, info: dict, rows: pd.DataFrame, t0, h: int, data_through, tiers,
@@ -180,6 +203,7 @@ def _watchlist_alerts(session: Session, values: list[dict]) -> None:
 
 # ------------------------------------------------------------------ reads
 OUTLOOK_LABELS = {"worse": "Could get worse", "better": "Could get better", "same": "Likely to stay the same"}
+LEVEL_ORDER = ["low", "elevated", "high", "critical"]
 
 
 def outlook(worse: MlPrediction | None, better: MlPrediction | None, t_worse: float, t_better: float) -> dict:
@@ -219,8 +243,12 @@ def outlooks(session: Session, h: int = 3) -> dict[str, dict]:
         w, b = r.get("worse"), r.get("better")
         o = outlook(w, b, tw, tb)
         main = w if o["direction"] == "worse" else b if o["direction"] == "better" else None
-        o.update(current_tier=(w or b).current_tier if (w or b) else None, window=window,
-                 reasons=(main.reasons if main is not None else [])[:3])
+        tier = (w or b).current_tier if (w or b) else None
+        to = None  # the level it would move to (at least one step)
+        if tier in LEVEL_ORDER and o["direction"] != "same":
+            i = LEVEL_ORDER.index(tier) + (1 if o["direction"] == "worse" else -1)
+            to = LEVEL_ORDER[max(0, min(3, i))]
+        o.update(current_tier=tier, to_tier=to, window=window, reasons=(main.reasons if main is not None else [])[:3])
         out[iso3] = o
     return out
 def latest_window(session: Session, name: str = MODEL) -> tuple[str, object] | None:

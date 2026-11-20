@@ -28,28 +28,45 @@ def violent(db, iso3, n):
                             member_count=3, source_domains=["a.com", "b.com", "c.com"], max_severity=0.85))
 
 
-def test_today_lists_countries(db, monkeypatch):
+def fake_index(levels: dict[str, tuple[str, float, dict]]):
+    def live(session, today=None, weights=None):
+        return {iso: {"score": sc, "level": lv, "deaths_12m": 0, "news_events_30d": 5000,
+                      "dimensions": {"violence": 50, "military": 40, "tension": 40, "unrest": 20, "momentum": 50, **dims}}
+                for iso, (lv, sc, dims) in levels.items()}
+    return live
+
+
+def test_today_lists_countries_by_crisis_index(db, monkeypatch):
+    from app.ml import crisis_index as CI
+
     monkeypatch.setattr(plain, "conflict_deaths_12m", lambda s: {"UKR": 30_000, "ISR": 2_000})
+    monkeypatch.setattr(CI, "live", fake_index({
+        "UKR": ("critical", 95, {"violence": 98}),
+        "ISR": ("high", 88, {"tension": 99}),
+        "IRN": ("elevated", 75, {"tension": 97}),
+        "TWN": ("elevated", 73, {"military": 92, "violence": 2}),   # no situation, but a tense stand-off
+        "GBR": ("low", 50, {}),
+    }))
     add(db, "CR-1", ["RUS", "UKR"], ["UKR"], "elevated", 12, 80)
     add(db, "CR-2", ["ISR", "PSE"], ["ISR"], "high", 5, 60)
     add(db, "CR-3", ["IRN", "ISR", "USA"], ["IRN", "ISR"], "high", 5, 60)   # Israel is in two situations
-    add(db, "CR-4", ["GBR"], ["GBR"], "high", 30, 90)                        # local reports only -> other signals
+    add(db, "CR-4", ["GBR"], ["GBR"], "high", 30, 90)                        # index Low -> other signals
     violent(db, "UKR", 4)
     db.commit()
     c = TestClient(app)
     r = c.get("/api/v1/today").json()
     heads = [x["headline"] for x in r["countries"]]
-    assert heads == ["Crisis in Ukraine", "Crisis in Israel", "Crisis in Iran"]
-    ukr, isr = r["countries"][0], r["countries"][1]
-    assert ukr["severity"]["label"] == "Critical"  # 30k verified deaths
+    assert heads == ["Crisis in Ukraine", "Crisis in Israel", "Crisis in Iran", "Crisis in Taiwan"]
+    ukr, isr, irn, twn = r["countries"]
+    assert ukr["severity"]["label"] == "Critical" and ukr["index"]["dimensions"]["violence"] == 98
     assert ukr["reasons"][0].startswith("About 30,000 people killed")
-    assert "4 reports of attacks" in ukr["reasons"][1]
+    assert "4 reports of attacks" in " ".join(ukr["reasons"])
     assert [a["name"] for a in ukr["also_involved"]] == ["Russia"]  # Russia only takes part from outside here
     assert len(isr["situations"]) == 2 and isr["severity"]["label"] == "High"
-    assert {a["iso3"] for a in isr["also_involved"]} == {"IRN", "PSE", "USA"}
-    assert "Crisis in Russia" not in heads and "Crisis in United States" not in heads
+    assert irn["severity"]["label"] == "Moderate" and irn["reasons"][0].startswith("Very tense")  # not deaths alone
+    assert twn["kind_label"] == "Military tension" and twn["situations"] == []
     assert [x["headline"] for x in r["other_signals"]] == ["Crisis in United Kingdom"]
-    assert r["summary"]["countries"] == 3 and r["summary"]["getting_worse"] == 0
+    assert r["summary"]["countries"] == 4 and r["summary"]["by_level"]["elevated"] == 2
 
     d = c.get("/api/v1/countries/UKR").json()
     assert d["story"]["headline"] == "Crisis in Ukraine" and len(d["story"]["activity"]) == 7
@@ -83,29 +100,39 @@ def test_what_changed_only_with_a_full_day_to_compare(db):
     assert w["note"] is None and w["items"][0]["iso3"] == "UKR"
 
 
-def test_recent_news_signal_compares_with_normal_and_world(db):
+def test_crisis_index_live_from_news_and_deaths(db, monkeypatch):
+    """Live index from GDELT daily files: tension-heavy news raises a country without deaths; a country with little
+    news is pulled towards the world average; verified deaths set the violence dimension."""
     from datetime import date
 
     from app.geopolitics.models import NewsCountryMonthPart
+    from app.ml import crisis_index as CI
 
     today = date(2026, 11, 20)
+    monkeypatch.setattr(plain, "conflict_deaths_12m", lambda s: {"AAA": 20_000})
 
-    def day(n, iso, events, violent):
+    def part(d, iso, ev, v, mc, th, dt, pr, month=None):
+        db.add(NewsCountryMonthPart(file_key=f"{d:%Y%m%d}.export.CSV.zip", iso3=iso, month=month or d.replace(day=1),
+                                    events=ev, violent=v, material_conflict=mc, threats=th, diplomatic_tension=dt,
+                                    protests=pr))
+
+    # history 1990-2025 (reference distribution): ordinary months
+    for y in range(1990, 2026):
+        for k, iso in enumerate(("AAA", "BBB", "CCC", "DDD", "EEE", "WLD")):
+            t = 20 + ((y * 7 + k * 13) % 30) * 30       # tension share spread from 2% to 89%
+            part(date(y, 6, 1), iso, 1000, 50, 110, t // 2, t // 2, 5, month=date(y, 6, 1))
+    # last year and last 30 days
+    for n in range(1, 360, 7):
         d = today - timedelta(days=n)
-        db.add(NewsCountryMonthPart(file_key=f"{d:%Y%m%d}.export.CSV.zip", iso3=iso, month=d.replace(day=1),
-                                    events=events, violent=violent))
-
-    for n in range(1, 31):          # last 30 days
-        day(n, "WLD", 100_000, 8_000)   # world: unchanged at 8%
-        day(n, "ETH", 400, 56)          # Ethiopia: 14% violent ...
-        day(n, "KHM", 400, 8)           # Cambodia: 2% violent ...
-    for n in range(31, 396, 3):     # the 12 months before (every third day is enough)
-        day(n, "WLD", 100_000, 8_000)
-        day(n, "ETH", 400, 28)          # ... normally 7%
-        day(n, "KHM", 400, 32)          # ... normally 8%
+        part(d, "WLD", 100_000, 8_000, 14_000, 5_000, 8_000, 900)
+        part(d, "AAA", 3000, 300, 450, 150, 250, 30)      # at war
+        part(d, "BBB", 3000, 60, 150, 600 if n <= 30 else 150, 700 if n <= 30 else 200, 20)  # tension rising
+        part(d, "CCC", 80, 4, 20, 30, 30, 0)              # little news (~400 events a month): unreliable shares
     db.commit()
-    plain._signal_cache.update(at=0.0)
-    sig = plain.recent_news_signal(db, today)
-    assert sig["ETH"]["state"] == "surge" and sig["ETH"]["ratio"] == 2.0
-    assert sig["KHM"]["state"] == "cooling"
-    assert "WLD" not in sig
+    CI._cache.clear()
+    monkeypatch.setattr(CI, "cuts_for", lambda s, w=None: {"critical": 85.0, "high": 75.0, "elevated": 60.0})
+    ix = CI.live(db, today, weights=CI.DEFAULT_WEIGHTS)
+    a, b, c = ix["AAA"], ix["BBB"], ix["CCC"]
+    assert a["dimensions"]["violence"] == 100 and a["level"] == "critical"
+    assert b["dimensions"]["tension"] > 95 and b["dimensions"]["momentum"] > 60 and b["level"] != "low"
+    assert c["dimensions"]["tension"] < b["dimensions"]["tension"]   # shrunk towards the world average

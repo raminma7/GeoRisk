@@ -117,82 +117,6 @@ def combined_level(news_level: str, deaths_lvl: str) -> str:
     return LEVELS[max(base, min(news, base + 1))]
 
 
-# ------------------------------------------------- last 30 days vs normal
-_signal_cache: dict = {"at": 0.0, "value": {}}
-SIGNAL_MIN_EVENTS = 2000     # news events in the 30 days; fewer is too noisy to judge
-SURGE_SHARE, SURGE_RATIO, SURGE_HALF_RATIO = 10.0, 1.4, 1.2
-COOL_RATIO, COOL_HALF_RATIO = 0.65, 0.75
-
-
-def classify_recent(share: float, normal: float, share_a: float, share_b: float) -> str | None:
-    """'surge', 'cooling' or None from the violent share of news (%) in the last 30 days, its usual level (the 12
-    months before) and the two 15-day halves (the change must hold in both, so one shocking story is not enough).
-
-    Back-tested on GDELT 1.0 monthly data 2021–2025: a sustained drop to ≤0.65× normal was followed by fewer than
-    25 deaths in ~85% of cases; a jump alone is a weaker signal (~55–60%), so it can only lift a country to Moderate."""
-    if normal <= 0:
-        return None
-    r, ra, rb = share / normal, share_a / normal, share_b / normal
-    if share >= SURGE_SHARE and r >= SURGE_RATIO and min(ra, rb) >= SURGE_HALF_RATIO:
-        return "surge"
-    if r <= COOL_RATIO and max(ra, rb) <= COOL_HALF_RATIO:
-        return "cooling"
-    return None
-
-
-def recent_news_signal(s: Session, today: date | None = None) -> dict[str, dict]:
-    """Per country: share of news events that are violent (CAMEO 18–20) in the last 30 days of GDELT daily files,
-    compared with the country's own share over the 12 months before, corrected for the worldwide change in the same
-    period. Same source (GDELT daily files) on both sides."""
-    if time.time() - _signal_cache["at"] < 3600 and _signal_cache.get("today") == today:
-        return _signal_cache["value"]
-    today = today or utcnow().date()
-    w0, mid = today - timedelta(days=30), today - timedelta(days=15)
-    rows = s.execute(text(
-        "WITH f AS (SELECT iso3, to_date(left(file_key, 8), 'YYYYMMDD') AS d, events, violent "
-        "           FROM news_country_month_parts WHERE file_key ~ '^[0-9]{8}[.]' "
-        "           AND to_date(left(file_key, 8), 'YYYYMMDD') >= :b0 AND to_date(left(file_key, 8), 'YYYYMMDD') < :t) "
-        "SELECT iso3, "
-        " sum(events) FILTER (WHERE d >= :w0), sum(violent) FILTER (WHERE d >= :w0), "
-        " sum(events) FILTER (WHERE d >= :w0 AND d < :mid), sum(violent) FILTER (WHERE d >= :w0 AND d < :mid), "
-        " sum(events) FILTER (WHERE d >= :mid), sum(violent) FILTER (WHERE d >= :mid), "
-        " sum(events) FILTER (WHERE d < :w0), sum(violent) FILTER (WHERE d < :w0) "
-        "FROM f GROUP BY iso3"),
-        {"b0": w0 - timedelta(days=365), "w0": w0, "mid": mid, "t": today}).all()
-    by = {r[0]: r[1:] for r in rows}
-    out: dict[str, dict] = {}
-    world = by.get("WLD")
-    if not world or not all(world):
-        return out
-    we, wv, wea, wva, web, wvb, wen, wvn = world
-    # Worldwide change in the violent share over the same windows: a global news-cycle swing is not a change in
-    # any one country, so each country is compared with the world's change.
-    wn = wvn / wen
-    w, wa, wb = (wv / we) / wn, (wva / wea) / wn, (wvb / web) / wn
-    for iso, (e, v, ea, va, eb, vb, en, vn) in by.items():
-        if iso == "WLD" or not e or e < SIGNAL_MIN_EVENTS or not ea or not eb or not en or en < 5 * SIGNAL_MIN_EVENTS:
-            continue
-        share, normal = 100 * v / e, 100 * vn / en
-        adj = normal * w  # this country's usual share, moved by the worldwide change
-        state = classify_recent(share, adj, 100 * va / ea * (w / wa), 100 * vb / eb * (w / wb))
-        out[iso] = {"state": state, "share": round(share, 1), "normal": round(normal, 1),
-                    "ratio": round(share / adj, 2) if adj else None, "world_ratio": round(w, 2)}
-    _signal_cache.update(at=time.time(), value=out, today=today)
-    return out
-
-
-def adjusted_base(deaths_lvl: str, recent: dict | None) -> str:
-    """Deaths-based level, corrected by the last 30 days: a sustained surge lifts it to at least Moderate, a
-    sustained drop lowers it one step."""
-    rank = LEVEL_RANK.get(deaths_lvl, 0)
-    state = (recent or {}).get("state")
-    if state == "surge":
-        rank = max(rank, LEVEL_RANK["elevated"])
-    elif state == "cooling":
-        rank = max(0, rank - 1)
-    return LEVELS[rank]
-
-
 def confidence(ind: dict) -> dict:
     lbl = ind.get("evidence_confidence_label") or "low"
     src = ind.get("independent_sources_24h") or 0
@@ -351,30 +275,78 @@ def _country_activity(s: Session, isos: list[str], now: datetime, days: int = 7)
 
 
 def violence_totals(s: Session, now: datetime | None = None) -> dict:
-    """Violent events reported worldwide in the last 24h (deduplicated) and how many countries they happened in."""
+    """Violent events reported worldwide since the start of yesterday (UTC; deduplicated) and how many countries they
+    happened in. Same window as the map's default 'since yesterday' dots."""
     now = now or utcnow()
+    start = datetime.combine(now.date() - timedelta(days=1), datetime.min.time(), tzinfo=now.tzinfo)
     n, countries = s.execute(text(
         "SELECT count(*), count(DISTINCT action_country_iso3) FROM event_clusters WHERE kind = 'event' "
-        "AND quad_class = 4 AND last_seen_at >= :t"), {"t": now - timedelta(hours=24)}).one()
+        "AND quad_class = 4 AND last_seen_at >= :t"), {"t": start}).one()
     return {"violent_events_24h": n or 0, "countries_with_violence_24h": countries or 0}
 
 
-def country_stories(s: Session, sts: list[dict], now: datetime | None = None) -> list[dict]:
-    """One card per country where crisis events are happening: "Crisis in <country>".
+def _kind_label(ix: dict | None, deaths: int, fallback: str) -> str:
+    """What kind of crisis, from the strongest crisis-index dimension."""
+    if not ix:
+        return fallback
+    d = {k: v for k, v in ix["dimensions"].items() if v is not None and k != "momentum"}
+    if not d:
+        return fallback
+    top = max(d, key=lambda k: d[k] * {"violence": 1.0, "military": 0.75, "tension": 0.75, "unrest": 0.6}[k])
+    return {"violence": "Armed conflict" if deaths >= 25 else "Violence", "military": "Military tension",
+            "tension": "Political tension", "unrest": "Unrest"}[top]
 
-    A country is listed under the situations whose events take place there (location countries). Countries that
-    only take part from outside (e.g. the United States in Iran–Israel–United States) are shown as "also involved"."""
+
+def _dimension_reasons(ix: dict | None) -> list[str]:
+    """Plain sentences for the crisis-index dimensions that stand out (percentile vs all country-months since 1990)."""
+    if not ix:
+        return []
+    d = ix["dimensions"]
+    out: list[tuple[float, str]] = []
+
+    def top(v: float) -> str:
+        return f"top {max(1, round(100 - v))}% since 1990"
+
+    if (d.get("tension") or 0) >= 85:
+        out.append((d["tension"], f"Very tense: threats, sanctions and disputes in the news ({top(d['tension'])})"))
+    if (d.get("military") or 0) >= 85:
+        out.append((d["military"], f"High military activity: forces, blockades, raids in the news ({top(d['military'])})"))
+    if (d.get("unrest") or 0) >= 85:
+        out.append((d["unrest"], f"Many protests ({top(d['unrest'])})"))
+    m = d.get("momentum")
+    if m is not None and m >= 75:
+        out.append((m, f"Conflict news is {2 ** ((m - 50) / 50):.1f}× its usual level for this country"))
+    elif m is not None and m <= 25:
+        out.append((100 - m, f"Calmer than usual lately: conflict news at {2 ** ((m - 50) / 50):.1f}× its normal level"))
+    if (ix.get("deaths_12m") or 0) < 25 and (d.get("violence") or 0) >= 60:
+        out.append((d["violence"], "Much fighting and attacks reported in the news"))
+    return [t for _, t in sorted(out, key=lambda x: -x[0])]
+
+
+def country_stories(s: Session, sts: list[dict], now: datetime | None = None) -> list[dict]:
+    """One card per country: "Crisis in <country>", with the level from the crisis index (violence, military
+    activity, tension, unrest, change vs normal).
+
+    Listed: every country whose index is Moderate or above, plus the countries where followed situations take place
+    (those still Low go to 'other signals'). Countries that only take part from outside a situation are shown as
+    "also involved"."""
+    from app.ml import crisis_index as CI
+
     now = now or utcnow()
     names = dict(s.execute(select(Country.iso3, Country.name)).all())
     deaths = conflict_deaths_12m(s)
+    index = CI.live(s, now.date())
+    index_yesterday = CI.live(s, now.date() - timedelta(days=1))
     by: dict[str, list[dict]] = {}
     for st in sts:
         for iso in st["locations"]:
             by.setdefault(iso, []).append(st)
+    for iso, ix in index.items():
+        if ix["level"] != "low" and iso in names:
+            by.setdefault(iso, [])
     isos = sorted(by)
     counts = _country_counts(s, isos, now)
     act = _country_activity(s, isos, now)
-    signal = recent_news_signal(s, now.date())
     conf_rank = {"low": 0, "medium": 1, "high": 2}
     out = []
     for iso, group in by.items():
@@ -382,29 +354,18 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
         use = main_group or group
         name = names.get(iso, iso)
         d = deaths.get(iso, 0)
-        # The country's own verified deaths, raised by at most one step by the busiest situation's news level.
-        news_now = max((g["news_level"] for g in use), key=lambda x: LEVEL_RANK.get(x, 0))
-        recent = signal.get(iso)
-        base = adjusted_base(deaths_level(d), recent)
-        level = combined_level(news_now, base)
-        trend = max((g["trend"]["code"] for g in use), key=lambda x: TREND_RANK[x])
-        conf = max((g["confidence"] for g in use), key=lambda c: conf_rank.get(c["level"], 0))
+        ix = index.get(iso)
+        level = ix["level"] if ix else "low"
+        trend = max((g["trend"]["code"] for g in use), key=lambda x: TREND_RANK[x]) if use else "flat"
         violent, disputes = counts.get(iso, (0, 0))
-        # Same rule as today's severity, using each situation's level from ~24h ago. None = the country had no
-        # followed situation yesterday (it is new).
-        older = [g for g in use if g.get("level_yesterday")]
-        yest = None
-        if older:
-            yest = combined_level(max((g["level_yesterday"] for g in older), key=lambda x: LEVEL_RANK.get(x, 0)),
-                                  base)
+        conf = (max((g["confidence"] for g in use), key=lambda c: conf_rank.get(c["level"], 0)) if use else
+                {"level": "medium", "label": "Partly confirmed",
+                 "detail": f"{(ix or {}).get('news_events_30d', 0):,} news events in the last 30 days"})
+        yest = (index_yesterday.get(iso) or {}).get("level")
         rs: list[str] = []
         if d >= 25:
             rs.append(f"About {round_count(d)} people killed in organised violence here in the past 12 months (verified by UCDP)")
-        if recent and recent["state"] == "surge":
-            rs.append(f"Over the last 30 days {recent['share']:.0f}% of news about this country was about violence, "
-                      f"{recent['ratio']:.1f}× its usual level")
-        elif recent and recent["state"] == "cooling":
-            rs.append(f"Calmer lately: violent news over the last 30 days is at {recent['ratio']:.1f}× its usual level")
+        rs += _dimension_reasons(ix)
         if trend == "up":
             rs.append("Violence is rising compared with the previous days")
         elif trend == "down":
@@ -414,19 +375,23 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
         if disputes >= 3:
             rs.append(f"{disputes} threats, demands or diplomatic disputes in the last 24 hours")
         involved = sorted({c["iso3"] for g in use for c in g["countries"]} - {iso})
-        kind = min((g["kind"] for g in use), key=lambda k: {"conflict": 0, "tension": 1, "domestic": 2}[k])
+        kind = (min((g["kind"] for g in use), key=lambda k: {"conflict": 0, "tension": 1, "domestic": 2}[k]) if use
+                else "conflict" if d >= 25 else "tension")
         out.append({
-            "iso3": iso, "name": name, "headline": f"Crisis in {name}", "kind": kind, "kind_label": KIND_LABEL[kind],
+            "iso3": iso, "name": name, "headline": f"Crisis in {name}", "kind": kind,
+            "kind_label": _kind_label(ix, d, KIND_LABEL[kind]),
             "severity": {"level": level, "label": SEVERITY_WORD.get(level, "Low")},
+            "index": None if not ix else {"score": ix["score"], "dimensions": ix["dimensions"]},
             "trend": {"code": trend, "label": TREND[trend]}, "reasons": rs[:3], "confidence": conf,
-            "group": "main" if main_group else "other", "deaths_12m": d or None,
+            "group": "main" if level != "low" else "other", "deaths_12m": d or None,
             "violent_24h": violent, "activity": act.get(iso, []), "severity_yesterday": yest,
-            "disputes_24h": disputes, "recent_30d": recent,
+            "disputes_24h": disputes,
             "situations": [{"id": g["id"], "headline": g["headline"], "severity": g["severity"]}
                            for g in sorted(use, key=sort_key)],
             "also_involved": [{"iso3": x, "name": names.get(x, x)} for x in involved],
         })
-    return sorted(out, key=lambda c: (-LEVEL_RANK.get(c["severity"]["level"], 0), -c["violent_24h"], -(c["deaths_12m"] or 0)))
+    return sorted(out, key=lambda c: (-LEVEL_RANK.get(c["severity"]["level"], 0),
+                                      -((c["index"] or {}).get("score") or 0), -c["violent_24h"]))
 
 
 def what_changed(s: Session, countries: list[dict], now: datetime | None = None, limit: int = 12) -> dict:

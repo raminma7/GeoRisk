@@ -119,6 +119,10 @@ class Settings(BaseSettings):
             "new_development": 0.10,
         }
     )
+    # Crisis index (country severity): weight of each dimension; see app/ml/crisis_index.py
+    crisis_index_weights: dict[str, float] = Field(
+        default_factory=lambda: {"violence": 0.4, "military": 0.2, "tension": 0.2, "unrest": 0.1, "momentum": 0.1}
+    )
     priority_levels: dict[str, float] = Field(
         default_factory=lambda: {"critical": 75.0, "high": 55.0, "elevated": 35.0}
     )

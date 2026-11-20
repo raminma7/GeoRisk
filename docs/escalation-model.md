@@ -1,5 +1,13 @@
 # Outlook models: "will this country get better or worse?"
 
+> **Current version:** the models predict moves of the **crisis index** (violence, military activity, tension,
+> unrest, change vs normal; see `backend/app/ml/crisis_index.py` and the README), not of deaths alone. Labels: the
+> index level over the next 3 / 6 months (news of the window, annualised deaths) vs the level now. Results
+> 2013–2025: worse ROC-AUC 0.808 / 0.823 (base rate 11%), better 0.820 / 0.826 (base rate 36%); a simple
+> index-trend rule scores 0.31–0.45. Decision thresholds: worse 0.19 / 0.22, better 0.31 / 0.30. Most important
+> inputs: the index now, violence, the 3-month change of the index, democracy, momentum, military activity,
+> tension news. The sections below describe the earlier, deaths-only version and its results.
+
 Replaces the earlier conflict-onset model (removed), so the model answers the same question the site shows.
 
 ## Question (label)

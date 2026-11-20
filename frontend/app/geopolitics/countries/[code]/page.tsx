@@ -8,7 +8,7 @@ import Link from "next/link";
 import { use } from "react";
 import { CountryRiskCard } from "@/components/EarlyWarning";
 import type { Incident } from "@/components/SimpleCrisis";
-import { ActivityBars, ConfirmedBars, SeverityChip, Trend, type CountryStory } from "@/components/Today";
+import { ActivityBars, ConfirmedBars, IndexBars, SeverityChip, Trend, type CountryStory } from "@/components/Today";
 import { Loading, SourceLink, State } from "@/components/ui";
 import { qs, useApi } from "@/lib/api";
 import { ago } from "@/lib/format";
@@ -63,6 +63,12 @@ export default function CountryPage({ params }: { params: Promise<{ code: string
                     {s.reasons.map((r) => <li key={r} className="flex gap-2"><span aria-hidden className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />{r}</li>)}
                   </ul>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted"><ConfirmedBars c={s.confidence} /> · {s.confidence.detail}</div>
+                  {s.index && (
+                    <div className="mt-4 border-t border-line pt-4">
+                      <div className="mb-2 text-xs text-muted">What makes up the level (0–100, compared with all countries since 1990)</div>
+                      <IndexBars index={s.index} large />
+                    </div>
+                  )}
                 </section>
 
                 <section className="rounded-2xl border border-line bg-surface p-5">

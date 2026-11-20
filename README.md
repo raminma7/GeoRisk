@@ -41,16 +41,23 @@ The dashboard has two public pages:
 
 The wording is rule-based (`backend/app/monitoring/plain.py`, API `GET /api/v1/today`); no AI key is needed.
 
-Severity of a country (Critical / High / Moderate / Low) is built in three steps:
+Severity of a country (Critical / High / Moderate / Low) comes from the **crisis index** (0–100,
+`backend/app/ml/crisis_index.py`), built from five dimensions, not deaths alone:
 
-1. **Past 12 months:** verified deaths (UCDP): ≥10,000 Critical, ≥1,000 High, ≥100 Moderate.
-2. **Last 30 days:** the share of the country's news that is about violence (GDELT daily files), compared with its
-   own usual share over the 12 months before and corrected for the worldwide change. A sustained drop (≤0.65× in
-   both halves of the month) lowers step 1 by one level; a sustained jump (≥1.4× and ≥10% violent) lifts it to at least
-   Moderate, so a new war shows up before UCDP publishes it.
-3. **Last 24 hours:** very heavy conflict news can raise the result by one more level.
+| Dimension | From |
+|---|---|
+| Violence | verified deaths (UCDP, 12 months) + share of news about fighting and attacks |
+| Military activity | share of news about forces, blockades, coercion, cut relations |
+| Tension | share of news about threats, demands, sanctions, diplomatic disputes |
+| Unrest | share of news about protests |
+| Change vs normal | conflict news in the last 30 days vs the country's own previous year, corrected for the worldwide change |
 
-News volume alone can therefore never make a country Critical.
+News dimensions are shares of the country's own news, so heavy coverage alone does not raise a country. They are
+pulled towards the world average when a country has little news, and expressed as percentiles against all
+country-months since 1990. The strongest dimension sets the base and the others add to it (default weights
+40/20/20/10/10, editable in Admin as `crisis_index_weights`). Levels are cut-offs on the historical distribution:
+Critical = top 3% of country-months, High = next 7%, Moderate = next 15%. News is read from the GDELT daily files of
+the last 30 days, so the index is current even though UCDP lags by about two months.
 
 **Admin** (`/admin`): sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` (see `.env.example`; default password
 `georisk-admin`). The panel holds Settings (watchlist, thresholds, news queries, AI provider), data-collection health
@@ -60,11 +67,12 @@ changing it signs out other sessions. Settings changes always need this sign-in.
 ## Early warning (ML): "better or worse?"
 A separate **model service** ([`model-service/`](model-service)) serves four models: `crisis_escalation_3m/_6m`
 ("could it get worse?") and `crisis_calming_3m/_6m` ("could it get better?"). For every country they estimate the
-chance of moving **up** or **down** at least one severity level (the site's levels, by deaths from organised violence
-per year: <100 Low, 100+ Moderate, 1,000+ High, 10,000+ Critical) in the next 3 or 6 months. Each country gets one
+chance of moving **up** or **down** at least one level of the **crisis index** (the same Low / Moderate / High /
+Critical as the site) in the next 3 or 6 months. Each country gets one
 outlook per window: **could get worse**, **could get better** or **likely to stay the same** (a direction is shown
 when its probability passes a threshold chosen on the test years). Tested on 2013–2025 with models that never saw the
-test year: "worse" ROC-AUC 0.91 / 0.90, "better" 0.86 / 0.85 (simple rules: 0.52–0.64). The outlook appears on the
+test year: "worse" ROC-AUC 0.81 / 0.82, "better" 0.82 / 0.83 (simple trend rule: 0.31–0.45). Predictions start from
+today's index (news up to today). The outlook appears on the
 **Early warning** page (filters: all / worse / better / same), on every country card and on country pages. Details:
 [`docs/escalation-model.md`](docs/escalation-model.md).
 

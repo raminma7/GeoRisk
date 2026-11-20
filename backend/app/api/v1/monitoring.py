@@ -154,7 +154,9 @@ def _attach_outlook(s: Session, countries: list[dict]) -> None:
         a, b = o3.get(c["iso3"]), o6.get(c["iso3"])
         c["outlook"] = None if a is None else {
             "direction": a["direction"], "label": a["label"], "chance": a["chance"], "window": a["window"],
-            "six_months": None if b is None else {"direction": b["direction"], "label": b["label"], "window": b["window"]},
+            "current_tier": a["current_tier"], "to_tier": a["to_tier"],
+            "six_months": None if b is None else {"direction": b["direction"], "label": b["label"], "window": b["window"],
+                                                  "to_tier": b["to_tier"]},
         }
 
 

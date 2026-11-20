@@ -28,7 +28,7 @@ export const SEVERITY_FILL: Record<string, string> = { critical: "#d03b3b", high
 const OTHER_FILL = "#aab6c5";
 
 const SHOW = [["violent", "Violent events"], ["all", "All reported events"]] as const;
-const PERIOD = [["1", "Last 24 hours"], ["3", "Last 3 days"], ["7", "Last 7 days"]] as const;
+const PERIOD = [["1", "Since yesterday"], ["3", "Last 3 days"], ["7", "Last 7 days"]] as const;
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
 
@@ -100,8 +100,8 @@ export default function GlobalOverview() {
             label={<span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3 rounded-sm" style={{ background: SEVERITY_FILL[l] }} />
               {{ critical: "Critical", high: "High", elevated: "Moderate" }[l]}</span>} />
         ))}
-        <Stat label="Violent events (24h)" value={num(sm?.violent_events_24h)} hint="reported in the news, deduplicated" />
-        <Stat label="Countries with violence (24h)" value={num(sm?.countries_with_violence_24h)} hint="where those events happened" />
+        <Stat label="Violent events since yesterday" value={num(sm?.violent_events_24h)} hint="reported in the news, deduplicated" />
+        <Stat label="Countries with violence since yesterday" value={num(sm?.countries_with_violence_24h)} hint="where those events happened" />
       </div>
 
       <Card title="Global event map" right={<span className="text-xs text-muted">Click a coloured country for details</span>}>

@@ -35,14 +35,12 @@ HORIZONS = (3, 6)
 KINDS = {"worse": ("can_rise", "crisis_escalation"), "better": ("can_fall", "crisis_calming")}
 TIER_CUTS = (100, 1_000, 10_000)          # deaths per year
 TIER_NAMES = ["low", "elevated", "high", "critical"]
-LABEL_DEFINITION = ("Deaths from organised violence (UCDP, all types) in the next {h} months, scaled to a year, put "
-                    "the country at least one severity tier above its tier over the previous 12 months "
-                    "(tiers: <100, 100-999, 1,000-9,999, 10,000+ deaths per year). Countries already at the top "
-                    "tier are excluded.")
+LABEL_DEFINITION = ("The country's crisis index (violence, military activity, tension, unrest and change vs normal) "
+                    "over the next {h} months is at least one level higher than now (Low, Moderate, High, Critical). "
+                    "Countries already Critical are excluded.")
 
-CALM_DEFINITION = ("Deaths from organised violence (UCDP, all types) in the next {h} months, scaled to a year, put "
-                   "the country at least one severity tier below its tier over the previous 12 months. Only countries "
-                   "at Moderate or above.")
+CALM_DEFINITION = ("The country's crisis index over the next {h} months is at least one level lower than now. Only "
+                   "countries at Moderate or above.")
 
 SELECTED_DYNAMICS = ["news_violent_share_chg_6m", "news_threat_share_chg_6m", "news_avg_tone_chg_3m",
                      "news_avg_goldstein_chg_3m", "news_coverage_change_3m", "news_violent_share", "nb_sb_events_l1_chg_6m",
@@ -50,11 +48,13 @@ SELECTED_DYNAMICS = ["news_violent_share_chg_6m", "news_threat_share_chg_6m", "n
 SITE_FEATURES = ["all_deaths_l1", "all_deaths_l3", "all_deaths_l12", "tier_now", "deaths_trend_3v9",
                  "ns_events_l12", "os_events_l12", "news_violent_vs_normal", "news_protest_share",
                  "news_diplomatic_tension_share"]
+INDEX_FEATURES = ["idx_score", "idx_level", "idx_violence", "idx_military", "idx_tension", "idx_unrest", "idx_momentum",
+                  "idx_score_chg_3m"]
 
 
 def features() -> list[str]:
     base = (GROUPS["ucdp_history"] + GROUPS["neighbours_region"] + GROUPS["politics"] + GROUPS["economy"]
-            + SELECTED_DYNAMICS + SITE_FEATURES)
+            + SELECTED_DYNAMICS + SITE_FEATURES + INDEX_FEATURES)
     return list(dict.fromkeys(base))  # keep order, drop duplicates
 
 
@@ -95,24 +95,25 @@ def site_features(cm: pd.DataFrame, news: pd.DataFrame | None) -> pd.DataFrame:
     return out.merge(n[["iso3", "month", "news_violent_vs_normal"]], on=["iso3", "month"], how="left")
 
 
-def escalation_labels(cm: pd.DataFrame, h: int) -> pd.DataFrame:
-    rows = []
-    for iso, g in cm.sort_values("month").groupby("iso3"):
-        g = g.reset_index(drop=True)
-        prev12 = g["all_deaths"].shift(1).rolling(12, min_periods=12).sum()
-        nxt = g["all_deaths"][::-1].rolling(h, min_periods=h).sum()[::-1]   # months t..t+h-1
-        now_t, next_t = tier_of(prev12.fillna(0)), tier_of((nxt * 12 / h).fillna(0))
-        ok = prev12.notna() & nxt.notna()
-        rows.append(pd.DataFrame({
-            "iso3": iso, "month": g["month"],
-            f"can_rise_{h}m": ((now_t < len(TIER_CUTS)) & prev12.notna()).astype(int),
-            f"deaths_next_{h}m": nxt,
-            f"worse_{h}m": np.where(ok & (now_t < len(TIER_CUTS)), (next_t > now_t).astype(float), np.nan),
-            # the opposite question for countries in crisis: will it move down at least one level?
-            f"can_fall_{h}m": ((now_t > 0) & prev12.notna()).astype(int),
-            f"better_{h}m": np.where(ok & (now_t > 0), (next_t < now_t).astype(float), np.nan),
-        }))
-    return pd.concat(rows, ignore_index=True)
+def index_labels(hist: pd.DataFrame, cuts: dict[str, float]) -> pd.DataFrame:
+    """Labels on the crisis index: level of the next h months (news of the window, annualised deaths) vs the level
+    now. worse = up at least one level (not possible from Critical), better = down at least one (not from Low)."""
+    from app.ml.crisis_index import level_of
+
+    rank = {"low": 0, "elevated": 1, "high": 2, "critical": 3}
+    lvl = lambda s: s.map(lambda v: np.nan if pd.isna(v) else rank[level_of(v, cuts)])
+    out = hist[["iso3", "month"]].copy()
+    now = lvl(hist["idx_score"])
+    out["idx_level"] = now
+    out["idx_score_chg_3m"] = hist["idx_score"] - hist.groupby("iso3")["idx_score"].shift(3)
+    for h in HORIZONS:
+        nxt = lvl(hist[f"idx_score_next_{h}m"])
+        ok = now.notna() & nxt.notna()
+        out[f"can_rise_{h}m"] = (now < 3).astype(int).where(now.notna(), 0)
+        out[f"can_fall_{h}m"] = (now > 0).astype(int).where(now.notna(), 0)
+        out[f"worse_{h}m"] = np.where(ok & (now < 3), (nxt > now).astype(float), np.nan)
+        out[f"better_{h}m"] = np.where(ok & (now > 0), (nxt < now).astype(float), np.nan)
+    return out
 
 
 def build_frame(session: Session, forecast: bool = False) -> pd.DataFrame:
@@ -124,11 +125,16 @@ def build_frame(session: Session, forecast: bool = False) -> pd.DataFrame:
     if forecast:
         nxt = cm["month"].max() + pd.DateOffset(months=1)
         cm = pd.concat([cm, pd.DataFrame({"iso3": sorted(cm["iso3"].unique()), "month": nxt})], ignore_index=True)
+    from app.ml import crisis_index as CI
+
     news = monthly_frame(session)
     out = df.merge(site_features(cm, news), on=["iso3", "month"], how="left")
-    for h in HORIZONS:
-        out = out.merge(escalation_labels(cm, h), on=["iso3", "month"], how="left")
-    out.attrs = df.attrs
+    hist = CI.historical(session, cm)
+    cuts = CI.level_cuts(hist[(hist["month"] >= "1990-01-01") & (hist["month"] < "2026-01-01")]["idx_score"])
+    idx_cols = ["iso3", "month", "idx_score", *[f"idx_{k}" for k in CI.DIMENSIONS]]
+    out = out.merge(hist[idx_cols], on=["iso3", "month"], how="left")
+    out = out.merge(index_labels(hist, cuts), on=["iso3", "month"], how="left")
+    out.attrs = {**df.attrs, "index_cuts": cuts}
     return out
 
 
@@ -154,7 +160,7 @@ def walk_forward(df: pd.DataFrame, feats: list[str], h: int, years: list[int], k
         if test.empty:
             continue
         m = classifier().fit(train[feats], train[label].astype(int))
-        out.append(test[["iso3", "month", label, "tier_now", "deaths_trend_3v9", "news_violent_vs_normal"]]
+        out.append(test[["iso3", "month", label, "idx_level", "idx_score_chg_3m", "news_violent_vs_normal"]]
                    .assign(raw=m.predict_proba(test[feats])[:, 1], year=year))
     return pd.concat(out, ignore_index=True)
 
@@ -181,7 +187,7 @@ def report(pred: pd.DataFrame, h: int, kind: str = "worse") -> dict:
     scores = {
         "model": pred["raw"].to_numpy(),
         # simple rules a reader could apply by hand, for comparison
-        "rule_deaths_trend": sign * pred["deaths_trend_3v9"].fillna(1).to_numpy(),
+        "rule_index_trend": sign * pred["idx_score_chg_3m"].fillna(0).to_numpy(),
         "rule_violent_news": sign * pred["news_violent_vs_normal"].fillna(1).to_numpy(),
     }
     out: dict = {}
@@ -191,7 +197,7 @@ def report(pred: pd.DataFrame, h: int, kind: str = "worse") -> dict:
     by_tier = {}
     tiers = range(len(TIER_NAMES) - 1) if kind == "worse" else range(1, len(TIER_NAMES))
     for t in tiers:
-        sub = pred[pred["tier_now"] == t]
+        sub = pred[pred["idx_level"] == t]
         by_tier[TIER_NAMES[t]] = _metrics(sub[label].astype(int).to_numpy(), sub["raw"].to_numpy())
     out["model_by_current_tier"] = by_tier
     return out
@@ -259,8 +265,9 @@ def train_and_export(session: Session, test_years: list[int] | None = None,
             "name": name, "version": version, "trained_at": trained.isoformat(), "horizon_months": h,
             "features": feats, "label": label, "direction": kind,
             "label_definition": (LABEL_DEFINITION if kind == "worse" else CALM_DEFINITION).format(h=h),
-            "applies_to": ("Every country except those already at the top tier (10,000+ deaths a year)" if kind == "worse"
-                           else "Countries at Moderate or above (100+ deaths a year)"),
+            "applies_to": ("Every country except those already Critical on the crisis index" if kind == "worse"
+                           else "Countries at Moderate or above on the crisis index"),
+            "index_cuts": df.attrs.get("index_cuts"),
             "decision_threshold": rep["decision"]["threshold"],
             "prediction_window": f"the {h} months after the data ends",
             "training_rows": len(data), "training_positives": int(data[label].sum()),
