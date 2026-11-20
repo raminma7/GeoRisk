@@ -59,9 +59,12 @@ export default function GlobalOverview() {
   const [show, setShow] = useState<"violent" | "all">("violent");
   const [period, setPeriod] = useState("1");
   const [place, setPlace] = useState("");
-  const events = useApi<{ features: never[]; total?: number }>(`/api/v1/events${qs({
-    view: "map", limit: 400, start: daysAgo(Number(period)), quad_class: show === "violent" ? 4 : undefined, located_in: place || undefined,
-  })}`, { refreshInterval: 120_000 });
+  type MapEvents = { features: never[]; total?: number; countries?: number };
+  const mapUrl = (p: string, violent: boolean, where: string) => `/api/v1/events${qs({
+    view: "map", limit: 400, start: daysAgo(Number(p)), quad_class: violent ? 4 : undefined, located_in: where || undefined })}`;
+  const events = useApi<MapEvents>(mapUrl(period, show === "violent", place), { refreshInterval: 120_000 });
+  // The violent-event tiles read the map's own default view (same request, so the numbers always match the dots).
+  const violent24h = useApi<MapEvents>(mapUrl("1", true, ""), { refreshInterval: 120_000 });
 
   const { fills, titles, numToIso } = useMemo(() => {
     const toNum = new Map((countries.data?.items || []).filter((c) => c.iso_numeric).map((c) => [c.iso3, String(c.iso_numeric).padStart(3, "0")]));
@@ -100,8 +103,8 @@ export default function GlobalOverview() {
             label={<span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3 rounded-sm" style={{ background: SEVERITY_FILL[l] }} />
               {{ critical: "Critical", high: "High", elevated: "Moderate" }[l]}</span>} />
         ))}
-        <Stat label="Violent events since yesterday" value={num(sm?.violent_events_24h)} hint="dots on the map, deduplicated" />
-        <Stat label="Countries with violence since yesterday" value={num(sm?.countries_with_violence_24h)} hint="where those events happened" />
+        <Stat label="Violent events since yesterday" value={num(violent24h.data?.total ?? sm?.violent_events_24h)} hint="dots on the map, deduplicated" />
+        <Stat label="Countries with violence since yesterday" value={num(violent24h.data?.countries ?? sm?.countries_with_violence_24h)} hint="where those events happened" />
       </div>
 
       <Card title="Global event map" right={<span className="text-xs text-muted">Click a coloured country for details</span>}>

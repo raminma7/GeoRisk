@@ -99,7 +99,9 @@ def events(country: str | None = None, region: str | None = None, category: str 
         if view == "map":
             q = q.where(EventCluster.latitude.is_not(None)).order_by(desc(EventCluster.max_severity),
                                                                     desc(EventCluster.member_count))
-            total = s.scalar(select(func.count()).select_from(q.order_by(None).subquery())) or 0
+            sub = q.order_by(None).subquery()
+            total, n_countries = s.execute(select(func.count(), func.count(func.distinct(sub.c.action_country_iso3)))
+                                           .select_from(sub)).one()
             rows = s.scalars(q.limit(min(p.limit * 4, 2000))).all()
             from app.geopolitics.models import NormalizedGeopoliticalEvent as NGE
             from app.monitoring import plain
@@ -107,7 +109,7 @@ def events(country: str | None = None, region: str | None = None, category: str 
             reps = {e.id: e for e in s.scalars(select(NGE).where(NGE.id.in_(
                 [c.representative_event_id for c in rows if c.representative_event_id])))}
             texts = plain.incident_texts(s, [(c, reps.get(c.representative_event_id)) for c in rows])
-            return {"type": "FeatureCollection", "total": total, "features": [
+            return {"type": "FeatureCollection", "total": total or 0, "countries": n_countries or 0, "features": [
                 {"type": "Feature", "geometry": {"type": "Point", "coordinates": [c.longitude, c.latitude]},
                  "properties": {"id": c.id, "title": c.title, "text": texts.get(c.id) or c.title, "severity": c.max_severity,
                                 "category": cameo.category(c.event_root_code), "quad_class": c.quad_class,
