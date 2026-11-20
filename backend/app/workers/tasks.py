@@ -94,6 +94,19 @@ def heartbeat() -> dict:
 
 
 @celery_app.task(**RETRY)
+@single_instance("news_daily_archive", ttl_seconds=3600)
+def news_daily_archive() -> dict:
+    """Daily: the newest GDELT 1.0 daily files (one small file per day). Keeps the 30-day 'violent news compared
+    with normal' signal used for crisis severity current; already downloaded files are skipped."""
+    from datetime import date
+
+    from app.ml.news_history import backfill
+
+    today = date.today()
+    return backfill(today.year - 1 if today.month == 1 else today.year, today.year, workers=1)
+
+
+@celery_app.task(**RETRY)
 @single_instance("ml_monthly_early_warning", ttl_seconds=10800)
 def ml_monthly_early_warning() -> dict:
     """Monthly: newest UCDP Candidate data -> current-year news archive -> early-warning predictions."""

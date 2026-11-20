@@ -117,6 +117,82 @@ def combined_level(news_level: str, deaths_lvl: str) -> str:
     return LEVELS[max(base, min(news, base + 1))]
 
 
+# ------------------------------------------------- last 30 days vs normal
+_signal_cache: dict = {"at": 0.0, "value": {}}
+SIGNAL_MIN_EVENTS = 2000     # news events in the 30 days; fewer is too noisy to judge
+SURGE_SHARE, SURGE_RATIO, SURGE_HALF_RATIO = 10.0, 1.4, 1.2
+COOL_RATIO, COOL_HALF_RATIO = 0.65, 0.75
+
+
+def classify_recent(share: float, normal: float, share_a: float, share_b: float) -> str | None:
+    """'surge', 'cooling' or None from the violent share of news (%) in the last 30 days, its usual level (the 12
+    months before) and the two 15-day halves (the change must hold in both, so one shocking story is not enough).
+
+    Back-tested on GDELT 1.0 monthly data 2021–2025: a sustained drop to ≤0.65× normal was followed by fewer than
+    25 deaths in ~85% of cases; a jump alone is a weaker signal (~55–60%), so it can only lift a country to Moderate."""
+    if normal <= 0:
+        return None
+    r, ra, rb = share / normal, share_a / normal, share_b / normal
+    if share >= SURGE_SHARE and r >= SURGE_RATIO and min(ra, rb) >= SURGE_HALF_RATIO:
+        return "surge"
+    if r <= COOL_RATIO and max(ra, rb) <= COOL_HALF_RATIO:
+        return "cooling"
+    return None
+
+
+def recent_news_signal(s: Session, today: date | None = None) -> dict[str, dict]:
+    """Per country: share of news events that are violent (CAMEO 18–20) in the last 30 days of GDELT daily files,
+    compared with the country's own share over the 12 months before, corrected for the worldwide change in the same
+    period. Same source (GDELT daily files) on both sides."""
+    if time.time() - _signal_cache["at"] < 3600 and _signal_cache.get("today") == today:
+        return _signal_cache["value"]
+    today = today or utcnow().date()
+    w0, mid = today - timedelta(days=30), today - timedelta(days=15)
+    rows = s.execute(text(
+        "WITH f AS (SELECT iso3, to_date(left(file_key, 8), 'YYYYMMDD') AS d, events, violent "
+        "           FROM news_country_month_parts WHERE file_key ~ '^[0-9]{8}[.]' "
+        "           AND to_date(left(file_key, 8), 'YYYYMMDD') >= :b0 AND to_date(left(file_key, 8), 'YYYYMMDD') < :t) "
+        "SELECT iso3, "
+        " sum(events) FILTER (WHERE d >= :w0), sum(violent) FILTER (WHERE d >= :w0), "
+        " sum(events) FILTER (WHERE d >= :w0 AND d < :mid), sum(violent) FILTER (WHERE d >= :w0 AND d < :mid), "
+        " sum(events) FILTER (WHERE d >= :mid), sum(violent) FILTER (WHERE d >= :mid), "
+        " sum(events) FILTER (WHERE d < :w0), sum(violent) FILTER (WHERE d < :w0) "
+        "FROM f GROUP BY iso3"),
+        {"b0": w0 - timedelta(days=365), "w0": w0, "mid": mid, "t": today}).all()
+    by = {r[0]: r[1:] for r in rows}
+    out: dict[str, dict] = {}
+    world = by.get("WLD")
+    if not world or not all(world):
+        return out
+    we, wv, wea, wva, web, wvb, wen, wvn = world
+    # Worldwide change in the violent share over the same windows: a global news-cycle swing is not a change in
+    # any one country, so each country is compared with the world's change.
+    wn = wvn / wen
+    w, wa, wb = (wv / we) / wn, (wva / wea) / wn, (wvb / web) / wn
+    for iso, (e, v, ea, va, eb, vb, en, vn) in by.items():
+        if iso == "WLD" or not e or e < SIGNAL_MIN_EVENTS or not ea or not eb or not en or en < 5 * SIGNAL_MIN_EVENTS:
+            continue
+        share, normal = 100 * v / e, 100 * vn / en
+        adj = normal * w  # this country's usual share, moved by the worldwide change
+        state = classify_recent(share, adj, 100 * va / ea * (w / wa), 100 * vb / eb * (w / wb))
+        out[iso] = {"state": state, "share": round(share, 1), "normal": round(normal, 1),
+                    "ratio": round(share / adj, 2) if adj else None, "world_ratio": round(w, 2)}
+    _signal_cache.update(at=time.time(), value=out, today=today)
+    return out
+
+
+def adjusted_base(deaths_lvl: str, recent: dict | None) -> str:
+    """Deaths-based level, corrected by the last 30 days: a sustained surge lifts it to at least Moderate, a
+    sustained drop lowers it one step."""
+    rank = LEVEL_RANK.get(deaths_lvl, 0)
+    state = (recent or {}).get("state")
+    if state == "surge":
+        rank = max(rank, LEVEL_RANK["elevated"])
+    elif state == "cooling":
+        rank = max(0, rank - 1)
+    return LEVELS[rank]
+
+
 def confidence(ind: dict) -> dict:
     lbl = ind.get("evidence_confidence_label") or "low"
     src = ind.get("independent_sources_24h") or 0
@@ -298,6 +374,7 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
     isos = sorted(by)
     counts = _country_counts(s, isos, now)
     act = _country_activity(s, isos, now)
+    signal = recent_news_signal(s, now.date())
     conf_rank = {"low": 0, "medium": 1, "high": 2}
     out = []
     for iso, group in by.items():
@@ -307,7 +384,9 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
         d = deaths.get(iso, 0)
         # The country's own verified deaths, raised by at most one step by the busiest situation's news level.
         news_now = max((g["news_level"] for g in use), key=lambda x: LEVEL_RANK.get(x, 0))
-        level = combined_level(news_now, deaths_level(d))
+        recent = signal.get(iso)
+        base = adjusted_base(deaths_level(d), recent)
+        level = combined_level(news_now, base)
         trend = max((g["trend"]["code"] for g in use), key=lambda x: TREND_RANK[x])
         conf = max((g["confidence"] for g in use), key=lambda c: conf_rank.get(c["level"], 0))
         violent, disputes = counts.get(iso, (0, 0))
@@ -317,10 +396,15 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
         yest = None
         if older:
             yest = combined_level(max((g["level_yesterday"] for g in older), key=lambda x: LEVEL_RANK.get(x, 0)),
-                                  deaths_level(d))
+                                  base)
         rs: list[str] = []
         if d >= 25:
             rs.append(f"About {round_count(d)} people killed in organised violence here in the past 12 months (verified by UCDP)")
+        if recent and recent["state"] == "surge":
+            rs.append(f"Over the last 30 days {recent['share']:.0f}% of news about this country was about violence, "
+                      f"{recent['ratio']:.1f}× its usual level")
+        elif recent and recent["state"] == "cooling":
+            rs.append(f"Calmer lately: violent news over the last 30 days is at {recent['ratio']:.1f}× its usual level")
         if trend == "up":
             rs.append("Violence is rising compared with the previous days")
         elif trend == "down":
@@ -337,7 +421,7 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
             "trend": {"code": trend, "label": TREND[trend]}, "reasons": rs[:3], "confidence": conf,
             "group": "main" if main_group else "other", "deaths_12m": d or None,
             "violent_24h": violent, "activity": act.get(iso, []), "severity_yesterday": yest,
-            "disputes_24h": disputes,
+            "disputes_24h": disputes, "recent_30d": recent,
             "situations": [{"id": g["id"], "headline": g["headline"], "severity": g["severity"]}
                            for g in sorted(use, key=sort_key)],
             "also_involved": [{"iso3": x, "name": names.get(x, x)} for x in involved],

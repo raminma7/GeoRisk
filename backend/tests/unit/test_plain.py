@@ -88,3 +88,21 @@ def test_news_alone_cannot_make_a_country_critical():
     assert plain.combined_level("critical", "high") == "critical"     # ~1,000+ deaths and heavy news
     assert plain.combined_level("low", "critical") == "critical"      # a war stays critical on a quiet news day
     assert plain.combined_level("elevated", "low") == "elevated"
+
+
+def test_recent_30_days_signal_rules():
+    # new war: violent share jumps from 5% to 13% and stays high in both halves of the month
+    assert plain.classify_recent(13.0, 5.0, 12.0, 14.0) == "surge"
+    # one shocking story: high for 15 days only -> no change
+    assert plain.classify_recent(10.5, 5.0, 4.0, 17.0) is None
+    # ceasefire: violent share down to ~half its normal in both halves
+    assert plain.classify_recent(6.0, 11.0, 6.5, 5.5) == "cooling"
+    assert plain.classify_recent(8.0, 8.5, 8.0, 8.0) is None
+
+
+def test_adjusted_base_moves_one_step_at_most():
+    assert plain.adjusted_base("low", {"state": "surge"}) == "elevated"      # new war not yet in UCDP -> Moderate
+    assert plain.adjusted_base("high", {"state": "surge"}) == "high"
+    assert plain.adjusted_base("high", {"state": "cooling"}) == "elevated"   # war calmed down -> one step lower
+    assert plain.adjusted_base("low", {"state": "cooling"}) == "low"
+    assert plain.adjusted_base("critical", None) == "critical"

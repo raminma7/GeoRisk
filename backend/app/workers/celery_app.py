@@ -36,6 +36,8 @@ celery_app.conf.update(
                                "schedule": crontab(day_of_week="mon", hour=3, minute=23)},
         "ml-monthly-early-warning": {"task": "app.workers.tasks.ml_monthly_early_warning",
                                      "schedule": crontab(day_of_month=settings.predictions_day_of_month, hour=4, minute=13)},
+        "news-daily-archive": {"task": "app.workers.tasks.news_daily_archive",
+                               "schedule": crontab(hour=11, minute=37)},  # GDELT 1.0 daily file is out by ~10:00 UTC
         "ml-ensure-early-warning": {"task": "app.workers.tasks.ml_ensure_early_warning", "schedule": 3600},
         "worker-heartbeat": {"task": "app.workers.tasks.heartbeat", "schedule": 60},
     },

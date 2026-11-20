@@ -39,8 +39,18 @@ The dashboard has two public pages:
   situation or a country opens its page.
 - **Early warning** (`/early-warning`): countries ranked by the model's risk of a new conflict.
 
-The wording is rule-based (`backend/app/monitoring/plain.py`, API `GET /api/v1/today`); no AI key is needed. Severity
-combines how intense the news is with verified deaths in the past 12 months (UCDP).
+The wording is rule-based (`backend/app/monitoring/plain.py`, API `GET /api/v1/today`); no AI key is needed.
+
+Severity of a country (Critical / High / Moderate / Low) is built in three steps:
+
+1. **Past 12 months:** verified deaths (UCDP): ≥10,000 Critical, ≥1,000 High, ≥100 Moderate.
+2. **Last 30 days:** the share of the country's news that is about violence (GDELT daily files), compared with its
+   own usual share over the 12 months before and corrected for the worldwide change. A sustained drop (≤0.65× in
+   both halves of the month) lowers step 1 by one level; a sustained jump (≥1.4× and ≥10% violent) lifts it to at least
+   Moderate, so a new war shows up before UCDP publishes it.
+3. **Last 24 hours:** very heavy conflict news can raise the result by one more level.
+
+News volume alone can therefore never make a country Critical.
 
 **Admin** (`/admin`): sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` (see `.env.example`; default password
 `georisk-admin`). The panel holds Settings (watchlist, thresholds, news queries, AI provider), data-collection health

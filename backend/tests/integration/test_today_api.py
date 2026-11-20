@@ -81,3 +81,31 @@ def test_what_changed_only_with_a_full_day_to_compare(db):
     assert [i["text"] for i in w["items"]] == ["Crisis in UKR: worse than yesterday (High → Critical)",
                                                "New: Crisis in SDN", "Crisis in ISR: calming down"]
     assert w["note"] is None and w["items"][0]["iso3"] == "UKR"
+
+
+def test_recent_news_signal_compares_with_normal_and_world(db):
+    from datetime import date
+
+    from app.geopolitics.models import NewsCountryMonthPart
+
+    today = date(2026, 11, 20)
+
+    def day(n, iso, events, violent):
+        d = today - timedelta(days=n)
+        db.add(NewsCountryMonthPart(file_key=f"{d:%Y%m%d}.export.CSV.zip", iso3=iso, month=d.replace(day=1),
+                                    events=events, violent=violent))
+
+    for n in range(1, 31):          # last 30 days
+        day(n, "WLD", 100_000, 8_000)   # world: unchanged at 8%
+        day(n, "ETH", 400, 56)          # Ethiopia: 14% violent ...
+        day(n, "KHM", 400, 8)           # Cambodia: 2% violent ...
+    for n in range(31, 396, 3):     # the 12 months before (every third day is enough)
+        day(n, "WLD", 100_000, 8_000)
+        day(n, "ETH", 400, 28)          # ... normally 7%
+        day(n, "KHM", 400, 32)          # ... normally 8%
+    db.commit()
+    plain._signal_cache.update(at=0.0)
+    sig = plain.recent_news_signal(db, today)
+    assert sig["ETH"]["state"] == "surge" and sig["ETH"]["ratio"] == 2.0
+    assert sig["KHM"]["state"] == "cooling"
+    assert "WLD" not in sig
