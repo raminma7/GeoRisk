@@ -109,10 +109,12 @@ def news_daily_archive() -> dict:
 @celery_app.task(**RETRY)
 @single_instance("ml_monthly_early_warning", ttl_seconds=10800)
 def ml_monthly_early_warning() -> dict:
-    """Monthly: newest UCDP Candidate data -> current-year news archive -> early-warning predictions."""
+    """Monthly: newest UCDP Candidate data -> current-year news archive -> track record of past predictions ->
+    retrain the outlook models (kept only if at least as good) -> early-warning predictions."""
     from datetime import date
 
     from app.ingestion.connectors.ucdp import UcdpGedConnector
+    from app.ml import retrain, track_record
     from app.ml.news_history import backfill
     from app.ml.predictions import run_predictions
 
@@ -120,6 +122,14 @@ def ml_monthly_early_warning() -> dict:
     with session_scope() as s:
         out["ucdp_candidate"] = UcdpGedConnector(s).import_latest_candidate()
     out["news"] = backfill(date.today().year, date.today().year, workers=2)
+    for step, fn in (("track_record", track_record.update), ("retraining", retrain.retrain_if_better)):
+        try:  # a failed check or retrain must never block this month's predictions
+            with session_scope() as s:
+                res = fn(s)
+            out[step] = {n: e.get("replaced", e.get("roc_auc")) for n, e in res.get("models", {}).items()}
+        except Exception as exc:
+            log.exception("monthly_step_failed", step=step)
+            out[step] = {"error": str(exc)}
     with session_scope() as s:
         out["predictions"] = run_predictions(s)
     return out

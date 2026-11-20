@@ -13,6 +13,8 @@
     python -m app.cli download-factors [--refresh]                   # World Bank, V-Dem, EPR, prices
     python -m app.cli train-escalation-models                        # 3- and 6-month models -> model packages
     python -m app.cli predict                                        # model service -> ml_predictions
+    python -m app.cli track-record                                   # check past predictions against outcomes
+    python -m app.cli retrain                                        # retrain; replace a model only if better
     python -m app.cli labels [--horizon 1] [--start 2010-01-01]
     python -m app.cli train-baseline
     python -m app.cli analyze-crisis CRISIS_ID
@@ -166,6 +168,20 @@ def cmd_analyze_crisis(args) -> dict:
         return {"id": a.id, "status": a.status, "provider": a.provider, "error": a.error} if a else {"status": "unavailable"}
 
 
+def cmd_track_record(args) -> dict:
+    from app.ml.track_record import update
+
+    with session_scope() as s:
+        return update(s)
+
+
+def cmd_retrain(args) -> dict:
+    from app.ml.retrain import retrain_if_better
+
+    with session_scope() as s:
+        return retrain_if_better(s)
+
+
 def main() -> None:
     configure_logging()
     p = argparse.ArgumentParser(prog="georisk")
@@ -204,6 +220,8 @@ def main() -> None:
     x.add_argument("--max-files", type=int, default=None)
     x.set_defaults(fn=cmd_backfill_news_history)
     sub.add_parser("train-escalation-models").set_defaults(fn=cmd_train_escalation_models)
+    sub.add_parser("track-record").set_defaults(fn=cmd_track_record)
+    sub.add_parser("retrain").set_defaults(fn=cmd_retrain)
     sub.add_parser("predict").set_defaults(fn=cmd_predict)
     sub.add_parser("predict-onsets").set_defaults(fn=cmd_predict)  # old name, kept so existing instructions work
     x = sub.add_parser("download-factors")

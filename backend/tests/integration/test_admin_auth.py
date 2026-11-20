@@ -32,3 +32,12 @@ def test_login_settings_and_password_change(db):
                                                         "new_password": "a-new-pass1"}, headers=h).status_code == 200
     assert c.get("/api/v1/auth/me", headers=h).status_code == 401  # old sessions are signed out
     assert login(c).status_code == 401 and login(c, "a-new-pass1").status_code == 200
+
+
+def test_model_quality_is_admin_only(db):
+    c = TestClient(app)
+    assert c.get("/api/v1/settings/model-quality").status_code == 401
+    h = {"Authorization": f"Bearer {login(c).json()['token']}"}
+    d = c.get("/api/v1/settings/model-quality", headers=h).json()
+    assert d["snapshots"]["days"] == 0 and d["snapshots"]["needed_for_training"] == 365
+    assert d["track_record"] == {} and d["retraining"] == {}

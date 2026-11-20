@@ -131,7 +131,8 @@ def health():
 def models():
     return {"items": [{"name": m.name, "version": m.version, "features": m.features,
                        **{k: m.metadata.get(k) for k in ("label_definition", "applies_to", "prediction_window",
-                                                         "trained_at", "test", "provenance", "disclaimer", "algorithm")}}
+                                                         "trained_at", "test", "provenance", "disclaimer", "algorithm",
+                                                         "params", "training_rows", "decision_threshold")}}
                       for m in registry.models.values()]}
 
 

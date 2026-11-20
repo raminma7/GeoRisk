@@ -59,3 +59,17 @@ def update(key: str, body: SettingUpdate, s: Session = Depends(get_db), p: Princ
     s.add(AuditLog(actor=p.name, action="setting_update", target=key, details={"value": v}))
     s.commit()
     return {"key": key, "value": v}
+
+
+@router.get("/model-quality", summary="Outlook models: track record of past predictions and retraining decisions (admin)")
+def model_quality(s: Session = Depends(get_db), p: Principal = Depends(require_role("admin"))):
+    from sqlalchemy import func, select
+
+    from app.ml import retrain, track_record
+    from app.ml.models import FeatureSnapshot
+
+    snap_days, first = s.execute(select(func.count(func.distinct(FeatureSnapshot.as_of)), func.min(FeatureSnapshot.as_of))
+                                 .where(FeatureSnapshot.entity_type == "country_index")).one()
+    return {"track_record": track_record.stored(s), "retraining": retrain.stored(s),
+            "snapshots": {"days": snap_days, "since": first.date().isoformat() if first else None,
+                          "needed_for_training": retrain.SITE_MIN_DAYS}}

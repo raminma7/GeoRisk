@@ -114,3 +114,26 @@ python -m app.cli train-escalation-models
 ```bash
 python -m app.cli predict
 ```
+
+```bash
+python -m app.cli track-record
+```
+
+```bash
+python -m app.cli retrain
+```
+
+## Getting better over time
+- **Track record.** Every monthly run keeps its predictions. When UCDP covers a window's last month, each prediction
+  is checked with the training rule: "worse" came true if the window's index level is above the level shown when it
+  was predicted. The admin page shows, per model, how many months were checked, how often "could get worse/better" came
+  true (and the normal rate), how many real changes were caught, and the live vs test ROC-AUC.
+- **Monthly retraining with a gate.** After the UCDP import, all 4 models are retrained. A model with the same
+  recipe and more data replaces the served one, unless its recent test ROC-AUC is below 0.70. A new recipe must match
+  or beat the served model on the last 5 test years: ROC-AUC not lower and Brier not higher. Old packages are kept,
+  so rolling back is a folder delete. Decisions are listed on the admin page.
+- **The site's own data.** The site stores a daily snapshot of every country (`feature_snapshots`, entity
+  `country_index`): index score and level, the 5 dimensions, deaths, news volume, 14-day surge, the card's trend and
+  the number of followed situations. No archive has this. Once 365 days exist, the retraining also tries them as
+  monthly features (`site_*`), and the gate keeps them only if they help.
+- **Why not ACLED.** ACLED's terms forbid AI/ML training and derived datasets, so it is never used for the models.

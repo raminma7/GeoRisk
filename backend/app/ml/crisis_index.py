@@ -300,3 +300,16 @@ def cuts_for(session: Session, weights: dict | None = None) -> dict[str, float]:
     cuts = level_cuts(h["idx_score"])
     _cache[key] = (time.time(), cuts)
     return cuts
+
+
+def snapshot_history(session: Session) -> pd.DataFrame:
+    """The daily country snapshots the site has stored (``feature_snapshots``, entity ``country_index``), one row per
+    country and day: score, level, dim_*, deaths_12m, news_events_30d, recent_surge, trend, situations."""
+    rows = session.execute(text(
+        "SELECT entity_key AS iso3, as_of, features FROM feature_snapshots "
+        "WHERE entity_type='country_index' AND feature_set_version='crisis_index_v1' ORDER BY as_of")).all()
+    if not rows:
+        return pd.DataFrame(columns=["iso3", "date"])
+    df = pd.DataFrame([{"iso3": r.iso3, "date": pd.Timestamp(r.as_of).tz_localize(None).normalize(), **r.features}
+                       for r in rows])
+    return df

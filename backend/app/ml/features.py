@@ -46,9 +46,10 @@ def _window_cols(prefix: str = "") -> str:
     return ",\n  ".join(parts)
 
 
-def _store(session: Session, entity_type: str, key: str, as_of: datetime, feats: dict, vintages: dict) -> int:
+def _store(session: Session, entity_type: str, key: str, as_of: datetime, feats: dict, vintages: dict,
+           version: str = FEATURE_SET_VERSION) -> int:
     res = session.execute(insert(FeatureSnapshot).values(
-        entity_type=entity_type, entity_key=key, as_of=as_of, feature_set_version=FEATURE_SET_VERSION,
+        entity_type=entity_type, entity_key=key, as_of=as_of, feature_set_version=version,
         features=feats, source_vintages=vintages, created_at=utcnow(),
     ).on_conflict_do_nothing().returning(FeatureSnapshot.id))
     return len(res.all())
@@ -131,8 +132,41 @@ def build_daily_snapshots(session: Session, as_of: datetime | None = None) -> di
         stats["region"] += _store(session, "region", r["code"], as_of, feats, vintages)
     if glob:
         stats["global"] += _store(session, "global", "world", as_of, glob, vintages)
+    stats["country_index"] = build_country_index_snapshots(session, as_of)
     session.flush()
     return stats
+
+
+INDEX_SNAPSHOT_VERSION = "crisis_index_v1"
+
+
+def build_country_index_snapshots(session: Session, as_of: datetime) -> int:
+    """What the site shows for each country on ``as_of``: crisis index (score, level, 5 dimensions), deaths of the
+    last 12 months, news volume, 14-day surge, the card's trend and the number of followed situations there.
+
+    The site computes this live and would otherwise throw it away; kept daily it becomes training data that does
+    not exist in any archive (the outlook retraining picks it up once a year of it exists)."""
+    from app.ml import crisis_index as CI
+    from app.monitoring import plain
+
+    index = CI.live(session, as_of.date())
+    if not index:
+        return 0
+    stories = plain.active_stories(session)
+    trends = plain.country_trends(session, stories)
+    situations: dict[str, int] = {}
+    for st in stories:
+        for iso in st["locations"]:
+            situations[iso] = situations.get(iso, 0) + 1
+    vintages = {"index": INDEX_SNAPSHOT_VERSION, "pit_rule": "news files before as_of; UCDP as loaded on as_of"}
+    n = 0
+    for iso, v in index.items():
+        feats = {"score": v["score"], "level": v["level"], **{f"dim_{k}": x for k, x in v["dimensions"].items()},
+                 "deaths_12m": v["deaths_12m"], "news_events_30d": v["news_events_30d"],
+                 "recent_surge": v["recent_surge"], "trend": trends.get(iso, "flat"),
+                 "situations": situations.get(iso, 0)}
+        n += _store(session, "country_index", iso, as_of, feats, vintages, INDEX_SNAPSHOT_VERSION)
+    return n
 
 
 def backfill_snapshots(session: Session, start: datetime, end: datetime) -> list[dict]:

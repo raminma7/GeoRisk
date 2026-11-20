@@ -139,16 +139,21 @@ def build_frame(session: Session, forecast: bool = False) -> pd.DataFrame:
 
 
 # ------------------------------------------------------------------ model
-def classifier():
-    """Regularised gradient-boosted trees (more positives than the old onset label, so slightly deeper trees)."""
+# Chosen by a walk-forward grid (2013-2025, Nov 2026): 15 leaves / depth 4 / 600 trees beat the earlier 8 / 3 / 300 on
+# all 4 models (ROC-AUC +0.008 to +0.011, lower Brier); bigger trees or more trees did not help further.
+PARAMS = dict(n_estimators=600, learning_rate=0.03, max_depth=4, num_leaves=15, min_child_samples=100,
+              subsample=0.8, subsample_freq=1, colsample_bytree=0.7, reg_lambda=5.0)
+
+
+def classifier(params: dict | None = None):
+    """Regularised gradient-boosted trees. ``params`` overrides PARAMS (used by the tuning run)."""
     import lightgbm as lgb
 
-    return lgb.LGBMClassifier(n_estimators=300, learning_rate=0.03, max_depth=3, num_leaves=8, min_child_samples=100,
-                              subsample=0.8, subsample_freq=1, colsample_bytree=0.7, reg_lambda=5.0,
-                              random_state=SEED, verbose=-1)
+    return lgb.LGBMClassifier(**{**PARAMS, **(params or {})}, random_state=SEED, verbose=-1)
 
 
-def walk_forward(df: pd.DataFrame, feats: list[str], h: int, years: list[int], kind: str = "worse") -> pd.DataFrame:
+def walk_forward(df: pd.DataFrame, feats: list[str], h: int, years: list[int], kind: str = "worse",
+                 params: dict | None = None) -> pd.DataFrame:
     """Out-of-time predictions: each test year is scored by a model trained only on rows whose whole label window
     ended before that year (no outcome from the test year leaks into training)."""
     label, risk = f"{kind}_{h}m", f"{KINDS[kind][0]}_{h}m"
@@ -159,7 +164,7 @@ def walk_forward(df: pd.DataFrame, feats: list[str], h: int, years: list[int], k
         train, test = data[data["month"] < cutoff], data[data["month"].dt.year == year]
         if test.empty:
             continue
-        m = classifier().fit(train[feats], train[label].astype(int))
+        m = classifier(params).fit(train[feats], train[label].astype(int))
         out.append(test[["iso3", "month", label, "idx_level", "idx_score_chg_3m", "news_violent_vs_normal"]]
                    .assign(raw=m.predict_proba(test[feats])[:, 1], year=year))
     return pd.concat(out, ignore_index=True)
@@ -225,20 +230,21 @@ def importance(model, feats: list[str], top: int = 20) -> list[tuple[str, float]
     return sorted(((f, round(float(g / tot), 4)) for f, g in zip(feats, gain)), key=lambda x: -x[1])[:top]
 
 
-def train_and_export(session: Session, test_years: list[int] | None = None,
-                     df: pd.DataFrame | None = None) -> dict:
+def train(df: pd.DataFrame, feats: list[str] | None = None, params: dict | None = None,
+          test_years: list[int] | None = None) -> dict[str, dict]:
+    """Walk-forward test, calibration and final fit of the 4 models, in memory (nothing written)."""
     from sklearn.linear_model import LogisticRegression
 
-    settings = get_settings()
     test_years = test_years or list(range(2013, 2026))
-    df = df if df is not None else build_frame(session)
+    feats = feats or features()
+    params = {**PARAMS, **(params or {})}
     prov = df.attrs.get("provenance", {})
-    feats = features()
-    results = {}
+    out = {}
     for kind, h in [(k, h) for k in KINDS for h in HORIZONS]:
         label, risk = f"{kind}_{h}m", f"{KINDS[kind][0]}_{h}m"
-        pred = walk_forward(df, feats, h, test_years, kind)
+        pred = walk_forward(df, feats, h, test_years, kind, params)
         rep = report(pred, h, kind)
+        rep["recent"] = recent_metrics(pred, label)
         # Platt calibration on the out-of-time raw scores
         raw = np.clip(pred["raw"].to_numpy(), 1e-6, 1 - 1e-6)
         platt = LogisticRegression(C=1e6, max_iter=1000).fit(np.log(raw / (1 - raw)).reshape(-1, 1),
@@ -249,21 +255,17 @@ def train_and_export(session: Session, test_years: list[int] | None = None,
         rep["decision"] = decision_threshold(pred[label].astype(int).to_numpy(), np.interp(raw, grid, cal_y))
 
         data = df[(df[risk] == 1) & df[label].notna()]
-        model = classifier().fit(data[feats], data[label].astype(int))
+        model = classifier(params).fit(data[feats], data[label].astype(int))
         buf = io.BytesIO()
         data[["iso3", "month", *feats, label]].to_parquet(buf, index=False)
         checksum = hashlib.sha256(buf.getvalue()).hexdigest()
         trained = datetime.now(UTC)
-        version = f"v{trained:%Y%m%d}-{checksum[:8]}"
+        # minutes in the version so a same-day retrain sorts after the earlier one (the service loads the newest)
+        version = f"v{trained:%Y%m%d%H%M}-{checksum[:8]}"
         name = f"{KINDS[kind][1]}_{h}m"
-        pkg = Path(settings.model_dir) / name / version
-        pkg.mkdir(parents=True, exist_ok=True)
-        model.booster_.save_model(str(pkg / "model.txt"))
-        (pkg / "calibrator.json").write_text(json.dumps({"method": "platt_on_logit_raw", "x": grid.tolist(),
-                                                         "y": cal_y.tolist()}))
         meta = {
             "name": name, "version": version, "trained_at": trained.isoformat(), "horizon_months": h,
-            "features": feats, "label": label, "direction": kind,
+            "features": feats, "params": params, "label": label, "direction": kind,
             "label_definition": (LABEL_DEFINITION if kind == "worse" else CALM_DEFINITION).format(h=h),
             "applies_to": ("Every country except those already Critical on the crisis index" if kind == "worse"
                            else "Countries at Moderate or above on the crisis index"),
@@ -272,17 +274,55 @@ def train_and_export(session: Session, test_years: list[int] | None = None,
             "prediction_window": f"the {h} months after the data ends",
             "training_rows": len(data), "training_positives": int(data[label].sum()),
             "base_rate": float(data[label].mean()),
-            "algorithm": "lightgbm (depth-3, regularised) + Platt calibration on out-of-time scores",
+            "algorithm": "lightgbm (shallow, regularised) + Platt calibration on out-of-time scores",
             "data_checksum": checksum, "provenance": prov, "random_seed": SEED,
             "test": {"years": [test_years[0], test_years[-1]], **rep},
             "top_features": importance(model, feats),
             "disclaimer": "Research estimate based on historical patterns, not a forecast of events.",
         }
-        (pkg / "metadata.json").write_text(json.dumps(meta, indent=2, default=str))
-        log.info("escalation_model_exported", name=name, version=version, path=str(pkg))
-        results[name] = {"version": version, "path": str(pkg), "test": rep, "top_features": meta["top_features"],
-                         "training_rows": meta["training_rows"], "training_positives": meta["training_positives"]}
-    return results
+        out[name] = {"model": model, "calibrator": {"method": "platt_on_logit_raw", "x": grid.tolist(),
+                                                    "y": cal_y.tolist()}, "meta": meta}
+    return out
+
+
+RECENT_YEARS = 5
+
+
+def recent_metrics(pred: pd.DataFrame, label: str, years: int = RECENT_YEARS) -> dict:
+    """Out-of-time ROC-AUC / Brier over the last ``years`` test years (what the retraining gate compares)."""
+    from sklearn.metrics import brier_score_loss
+
+    last = sorted(pred["year"].unique())[-years:]
+    sub = pred[pred["year"].isin(last)]
+    y = sub[label].astype(int).to_numpy()
+    m = _metrics(y, sub["raw"].to_numpy())
+    m["brier"] = round(float(brier_score_loss(y, sub["raw"])), 4) if len(y) else None
+    m["years"] = [int(last[0]), int(last[-1])] if len(last) else []
+    return m
+
+
+def export(pkg: dict, model_dir: str | None = None) -> str:
+    meta = pkg["meta"]
+    path = Path(model_dir or get_settings().model_dir) / meta["name"] / meta["version"]
+    path.mkdir(parents=True, exist_ok=True)
+    pkg["model"].booster_.save_model(str(path / "model.txt"))
+    (path / "calibrator.json").write_text(json.dumps(pkg["calibrator"]))
+    (path / "metadata.json").write_text(json.dumps(meta, indent=2, default=str))
+    log.info("escalation_model_exported", name=meta["name"], version=meta["version"], path=str(path))
+    return str(path)
+
+
+def summary(pkg: dict, path: str | None = None) -> dict:
+    m = pkg["meta"]
+    return {"version": m["version"], "path": path, "test": m["test"], "top_features": m["top_features"],
+            "training_rows": m["training_rows"], "training_positives": m["training_positives"]}
+
+
+def train_and_export(session: Session, test_years: list[int] | None = None,
+                     df: pd.DataFrame | None = None) -> dict:
+    df = df if df is not None else build_frame(session)
+    pkgs = train(df, test_years=test_years)
+    return {name: summary(p, export(p)) for name, p in pkgs.items()}
 
 
 def calibrate(raw: np.ndarray, cal: dict) -> np.ndarray:

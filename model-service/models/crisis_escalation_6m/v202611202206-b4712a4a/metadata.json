@@ -1,7 +1,7 @@
 {
   "name": "crisis_escalation_6m",
-  "version": "v20261120-cb429585",
-  "trained_at": "2026-11-20T16:09:13.735854+00:00",
+  "version": "v202611202206-b4712a4a",
+  "trained_at": "2026-11-20T22:06:07.481792+00:00",
   "horizon_months": 6,
   "features": [
     "sb_events_l1",
@@ -64,8 +64,20 @@
     "idx_tension",
     "idx_unrest",
     "idx_momentum",
-    "idx_score_chg_3m"
+    "idx_score_chg_3m",
+    "idx_recent_surge"
   ],
+  "params": {
+    "n_estimators": 600,
+    "learning_rate": 0.03,
+    "max_depth": 4,
+    "num_leaves": 15,
+    "min_child_samples": 100,
+    "subsample": 0.8,
+    "subsample_freq": 1,
+    "colsample_bytree": 0.7,
+    "reg_lambda": 5.0
+  },
   "label": "worse_6m",
   "direction": "worse",
   "label_definition": "The country's crisis index (violence, military activity, tension, unrest and change vs normal) over the next 6 months is at least one level higher than now (Low, Moderate, High, Critical). Countries already Critical are excluded.",
@@ -75,13 +87,13 @@
     "high": 79.7,
     "elevated": 72.4
   },
-  "decision_threshold": 0.22,
+  "decision_threshold": 0.23,
   "prediction_window": "the 6 months after the data ends",
   "training_rows": 76717,
   "training_positives": 9151,
   "base_rate": 0.11928255797280915,
-  "algorithm": "lightgbm (depth-3, regularised) + Platt calibration on out-of-time scores",
-  "data_checksum": "cb42958599aea72d792d6bc78d100d9202a24a5dc2f46fec569a45cdaac47c80",
+  "algorithm": "lightgbm (shallow, regularised) + Platt calibration on out-of-time scores",
+  "data_checksum": "b4712a4a12f493b2bd357c555e9769367f94c256bd053d8a2d9786d6ea99b61e",
   "provenance": {
     "ucdp_official": "26.1",
     "ucdp_candidate": "candidate-v26_01_26_09",
@@ -97,9 +109,9 @@
       "n": 26541,
       "positives": 2989,
       "base_rate": 0.1126,
-      "roc_auc": 0.823,
-      "pr_auc": 0.408,
-      "top20_caught": 0.438
+      "roc_auc": 0.832,
+      "pr_auc": 0.428,
+      "top20_caught": 0.449
     },
     "rule_index_trend": {
       "n": 26541,
@@ -122,111 +134,123 @@
         "n": 19639,
         "positives": 2213,
         "base_rate": 0.1127,
-        "roc_auc": 0.82,
-        "pr_auc": 0.426
+        "roc_auc": 0.828,
+        "pr_auc": 0.447
       },
       "elevated": {
         "n": 4851,
         "positives": 472,
         "base_rate": 0.0973,
-        "roc_auc": 0.855,
-        "pr_auc": 0.342
+        "roc_auc": 0.863,
+        "pr_auc": 0.368
       },
       "high": {
         "n": 2051,
         "positives": 304,
         "base_rate": 0.1482,
-        "roc_auc": 0.748,
-        "pr_auc": 0.329
+        "roc_auc": 0.753,
+        "pr_auc": 0.327
       }
     },
+    "recent": {
+      "n": 10118,
+      "positives": 1093,
+      "base_rate": 0.108,
+      "roc_auc": 0.84,
+      "pr_auc": 0.402,
+      "brier": 0.0779,
+      "years": [
+        2021,
+        2025
+      ]
+    },
     "decision": {
-      "threshold": 0.22,
-      "f1": 0.439,
-      "precision": 0.367,
-      "recall": 0.548
+      "threshold": 0.23,
+      "f1": 0.454,
+      "precision": 0.389,
+      "recall": 0.544
     }
   },
   "top_features": [
     [
       "idx_score",
-      0.2658
+      0.21
     ],
     [
       "idx_violence",
-      0.1228
+      0.083
     ],
     [
       "idx_score_chg_3m",
-      0.0831
-    ],
-    [
-      "vdem_liberal_democracy",
-      0.0676
+      0.064
     ],
     [
       "idx_momentum",
-      0.0604
+      0.0518
+    ],
+    [
+      "vdem_liberal_democracy",
+      0.049
     ],
     [
       "idx_military",
-      0.0477
-    ],
-    [
-      "all_deaths_l3",
-      0.0413
-    ],
-    [
-      "news_diplomatic_tension_share",
-      0.0374
-    ],
-    [
-      "all_deaths_l12",
-      0.03
-    ],
-    [
-      "idx_level",
-      0.029
-    ],
-    [
-      "news_violent_share",
-      0.0242
+      0.0347
     ],
     [
       "wdi_log_population",
-      0.0193
-    ],
-    [
-      "vdem_electoral_democracy",
-      0.0162
-    ],
-    [
-      "wdi_gdp_growth_pct",
-      0.0127
-    ],
-    [
-      "wdi_inflation_pct",
-      0.0121
-    ],
-    [
-      "all_deaths_l1",
-      0.012
-    ],
-    [
-      "idx_tension",
-      0.0113
-    ],
-    [
-      "wdi_log_gdp_per_capita",
-      0.0104
+      0.0316
     ],
     [
       "wdi_unemployment_pct",
-      0.0097
+      0.0284
     ],
     [
-      "months_since_sb",
-      0.0076
+      "all_deaths_l3",
+      0.027
+    ],
+    [
+      "all_deaths_l12",
+      0.0269
+    ],
+    [
+      "news_diplomatic_tension_share",
+      0.0255
+    ],
+    [
+      "vdem_electoral_democracy",
+      0.0252
+    ],
+    [
+      "wdi_inflation_pct",
+      0.0252
+    ],
+    [
+      "wdi_pop_age_0_14_pct",
+      0.0222
+    ],
+    [
+      "news_violent_share",
+      0.0216
+    ],
+    [
+      "wdi_gdp_growth_pct",
+      0.02
+    ],
+    [
+      "wdi_log_gdp_per_capita",
+      0.018
+    ],
+    [
+      "idx_level",
+      0.0169
+    ],
+    [
+      "epr_excluded_pop_share",
+      0.0155
+    ],
+    [
+      "wdi_log_gdp_per_capita_chg_12m",
+      0.015
     ]
   ],
   "disclaimer": "Research estimate based on historical patterns, not a forecast of events."

@@ -81,7 +81,9 @@ says what history shows (sudden flare-ups of fighting news faded within 3 months
 **It sets itself up.** The trained model ships with the model service. On first start the background worker
 imports UCDP history, downloads the country factors (World Bank, V-Dem, EPR, prices) and the last two years of the
 GDELT news archive, then calculates predictions. This takes about 15–30 minutes, and the Early warning page shows
-progress meanwhile. After that it updates monthly. Manual commands:
+progress meanwhile. After that it updates monthly. Each month it also checks past predictions against what happened
+(track record) and retrains the models, keeping a new model only if it tests at least as well. The admin page shows
+both. It also keeps a daily snapshot of every country for future training. Manual commands:
 
 ```bash
 docker compose exec api python -m app.cli setup-early-warning
