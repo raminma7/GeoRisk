@@ -26,3 +26,14 @@ def test_env_example_loads(monkeypatch):
     assert s.environment == "development"
     assert s.cors_origins == ["http://localhost:3000"]
     assert s.ai_provider == "none" and "UKR" in s.watchlist
+
+
+def test_cors_accepts_dashboard_on_any_local_port():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    c = TestClient(app)
+    for origin, ok in (("http://localhost:3008", True), ("http://127.0.0.1:4000", True), ("https://evil.example", False)):
+        r = c.options("/health", headers={"Origin": origin, "Access-Control-Request-Method": "GET"})
+        assert (r.headers.get("access-control-allow-origin") == origin) is ok

@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     # NoDecode: accept plain comma-separated env values (e.g. CORS_ORIGINS=http://a,http://b); JSON lists also work
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
+    # Also allow the dashboard from any local port (e.g. a frontend moved to localhost:3008). Set to "" to disable.
+    cors_origin_regex: str = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
 
     # --- security ---------------------------------------------------------
     # Comma separated "role:key" pairs, e.g. "admin:abc123,analyst:def456".
