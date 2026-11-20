@@ -55,3 +55,29 @@ def test_today_lists_countries(db, monkeypatch):
     assert d["story"]["headline"] == "Crisis in Ukraine" and len(d["story"]["activity"]) == 7
     assert d["story"]["activity"][-1]["violent"] == 4
     assert d["recent_incidents"][0]["text"].startswith("Fighting")
+
+
+def country(iso3, level, yest, trend="flat", group="main"):
+    return {"iso3": iso3, "headline": f"Crisis in {iso3}", "group": group, "severity": {"level": level},
+            "severity_yesterday": yest, "trend": {"code": trend}}
+
+
+def test_what_changed_only_with_a_full_day_to_compare(db):
+    from sqlalchemy import select
+
+    from app.ingestion.models import DataSource, IngestionBatch
+
+    cs = [country("UKR", "critical", "high"), country("ISR", "high", "high", trend="down"), country("SDN", "high", None),
+          country("GBR", "critical", "low", group="other")]
+    w = plain.what_changed(db, cs, now=FIXTURE_NOW)
+    assert w["items"] == [] and "full day" in w["note"]  # nothing collected yet: no fake 'worse than yesterday'
+
+    src = db.scalar(select(DataSource.id).where(DataSource.key == "gdelt_events"))
+    for i in range(48 * 4):
+        db.add(IngestionBatch(data_source_id=src, batch_key=f"t{i}", batch_time=FIXTURE_NOW - timedelta(minutes=15 * i),
+                              status="done"))
+    db.commit()
+    w = plain.what_changed(db, cs, now=FIXTURE_NOW)
+    assert [i["text"] for i in w["items"]] == ["Crisis in UKR: worse than yesterday (High → Critical)",
+                                               "New: Crisis in SDN", "Crisis in ISR: calming down"]
+    assert w["note"] is None and w["items"][0]["iso3"] == "UKR"

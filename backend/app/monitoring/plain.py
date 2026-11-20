@@ -287,6 +287,13 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
         trend = max((g["trend"]["code"] for g in use), key=lambda x: TREND_RANK[x])
         conf = max((g["confidence"] for g in use), key=lambda c: conf_rank.get(c["level"], 0))
         violent, disputes = counts.get(iso, (0, 0))
+        # Same rule as today's severity, using each situation's level from ~24h ago. None = the country had no
+        # followed situation yesterday (it is new).
+        older = [g for g in use if g.get("level_yesterday")]
+        yest = None
+        if older:
+            yest = max([max(g["level_yesterday"], deaths_level(g.get("deaths_12m") or 0), key=lambda x: LEVEL_RANK.get(x, 0))
+                        for g in older] + [deaths_level(d)], key=lambda x: LEVEL_RANK.get(x, 0))
         rs: list[str] = []
         if d >= 25:
             rs.append(f"About {round_count(d)} people killed in organised violence here in the past 12 months (verified by UCDP)")
@@ -305,7 +312,7 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
             "severity": {"level": level, "label": SEVERITY_WORD.get(level, "Low")},
             "trend": {"code": trend, "label": TREND[trend]}, "reasons": rs[:3], "confidence": conf,
             "group": "main" if main_group else "other", "deaths_12m": d or None,
-            "violent_24h": violent, "activity": act.get(iso, []),
+            "violent_24h": violent, "activity": act.get(iso, []), "severity_yesterday": yest,
             "situations": [{"id": g["id"], "headline": g["headline"], "severity": g["severity"]}
                            for g in sorted(use, key=sort_key)],
             "also_involved": [{"iso3": x, "name": names.get(x, x)} for x in involved],
@@ -313,38 +320,38 @@ def country_stories(s: Session, sts: list[dict], now: datetime | None = None) ->
     return sorted(out, key=lambda c: (-LEVEL_RANK.get(c["severity"]["level"], 0), -c["violent_24h"], -(c["deaths_12m"] or 0)))
 
 
-def what_changed(s: Session, sts: list[dict], now: datetime | None = None, limit: int = 12) -> dict:
+def what_changed(s: Session, countries: list[dict], now: datetime | None = None, limit: int = 12) -> dict:
+    """Countries that got worse or better since yesterday, one line each.
+
+    Only shown when both yesterday and today were fully collected: a level computed while data was still missing
+    (right after installation or downtime) would make everything look worse."""
+    from app.monitoring.priority import MIN_TREND_COVERAGE, window_coverage
+
     now = now or utcnow()
+    comparable = (window_coverage(s, now - timedelta(hours=48), now - timedelta(hours=24)) >= MIN_TREND_COVERAGE
+                  and window_coverage(s, now - timedelta(hours=24), now) >= MIN_TREND_COVERAGE)
+    if not comparable:
+        return {"items": [], "note": "Changes since yesterday appear here once a full day of news has been collected "
+                                     "(about two days after installation or a long pause)."}
     items: list[dict] = []
-    start = _SYSTEM_START.get("start") or s.scalar(select(func.min(Crisis.first_observed_at)))
-    warming_up = start is None or now - start < timedelta(hours=48)
-    for st in sts:
-        if st["group"] != "main":
+    for c in countries:
+        if c["group"] != "main":
             continue
-        prev, cur = st["level_yesterday"], st["news_level"]  # compare like with like: news-based level
-        if prev and LEVEL_RANK.get(cur, 0) != LEVEL_RANK.get(prev, 0):
+        prev, cur = c.get("severity_yesterday"), c["severity"]["level"]
+        if prev is None:
+            items.append({"kind": "new", "iso3": c["iso3"], "text": f"New: {c['headline']}"})
+        elif LEVEL_RANK.get(cur, 0) != LEVEL_RANK.get(prev, 0):
             worse = LEVEL_RANK.get(cur, 0) > LEVEL_RANK.get(prev, 0)
-            items.append({"kind": "worse" if worse else "better", "crisis_id": st["id"],
-                          "text": f"{st['headline']}: {'more' if worse else 'less'} activity than yesterday "
-                                  f"({SEVERITY_WORD.get(prev, prev)} → {SEVERITY_WORD.get(cur, cur)} news intensity)"})
-        elif st["trend"]["code"] == "up":
-            items.append({"kind": "worse", "crisis_id": st["id"], "text": f"{st['headline']}: violence is rising"})
-        elif st["trend"]["code"] == "down":
-            items.append({"kind": "better", "crisis_id": st["id"], "text": f"{st['headline']}: calming down"})
-    if not warming_up:
-        for c in s.scalars(select(Crisis).where(Crisis.status.in_(ACTIVE), Crisis.first_observed_at >= now - timedelta(hours=48))
-                           .order_by(desc(Crisis.current_priority))):
-            st = next((x for x in sts if x["id"] == c.id), None)
-            if st and st["group"] == "main":
-                items.append({"kind": "new", "crisis_id": c.id, "text": f"New situation: {st['headline']}"})
+            items.append({"kind": "worse" if worse else "better", "iso3": c["iso3"],
+                          "text": f"{c['headline']}: {'worse' if worse else 'better'} than yesterday "
+                                  f"({SEVERITY_WORD.get(prev, prev)} → {SEVERITY_WORD.get(cur, cur)})"})
+        elif c["trend"]["code"] == "up":
+            items.append({"kind": "worse", "iso3": c["iso3"], "text": f"{c['headline']}: violence is rising"})
+        elif c["trend"]["code"] == "down":
+            items.append({"kind": "better", "iso3": c["iso3"], "text": f"{c['headline']}: calming down"})
     order = {"worse": 0, "new": 1, "better": 2}
     items.sort(key=lambda x: order[x["kind"]])
-    note = None
-    if warming_up:
-        note = "Monitoring started less than two days ago. Day-to-day changes will appear here once there is a day to compare with."
-    elif not items:
-        note = "No big changes since yesterday."
-    return {"items": items[:limit], "note": note}
+    return {"items": items[:limit], "note": None if items else "No big changes since yesterday."}
 
 
 def recent_incidents(s: Session, crisis_id: int | None = None, hours: int = 72, limit: int = 8,

@@ -30,7 +30,7 @@ type Today = {
   summary: { countries: number; serious: number; getting_worse: number; calming: number; countries_at_risk: number };
   countries: CountryStory[]; other_signals: Pick<CountryStory, "iso3" | "headline" | "severity" | "confidence" | "reasons">[];
   other_signals_total: number;
-  what_changed: { items: { kind: "worse" | "better" | "new"; crisis_id: number; text: string }[]; note: string | null };
+  what_changed: { items: { kind: "worse" | "better" | "new"; iso3: string; text: string }[]; note: string | null };
   could_start_soon: null | { window: { start: string; end: string }; items: Prediction[] };
   data_freshness: { latest_event_available_at: string | null };
   how_to_read: Record<string, string>;
@@ -148,7 +148,7 @@ function WhatChanged({ w }: { w: Today["what_changed"] }) {
       {w.items.length > 0 && (
         <ul className="space-y-2">
           {w.items.map((i, k) => (
-            <li key={k}><Link href={`/geopolitics/crises/${i.crisis_id}`} className="flex items-start gap-2 text-sm hover:text-accent">
+            <li key={k}><Link href={`/geopolitics/countries/${i.iso3}`} className="flex items-start gap-2 text-sm hover:text-accent">
               <span aria-hidden className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-xs ${icon[i.kind][1]}`}>{icon[i.kind][0]}</span>{i.text}
             </Link></li>
           ))}

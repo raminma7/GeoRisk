@@ -167,7 +167,7 @@ def today(s: Session = Depends(get_db), _: Principal = Depends(require_read)):
         "generated_at": iso(now), "summary": summary, "countries": main[:30],
         "other_signals": [{k: x[k] for k in ("iso3", "headline", "severity", "confidence", "reasons")} for x in other[:25]],
         "other_signals_total": len(other),
-        "what_changed": plain.what_changed(s, sts, now),
+        "what_changed": plain.what_changed(s, cs, now),
         "could_start_soon": ew,
         "conflict_data_through": iso(plain.deaths_through()),
         "data_freshness": {"latest_event_available_at": freshness(s).get("latest_event_available_at")},
