@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # --- security ---------------------------------------------------------
     # Comma separated "role:key" pairs, e.g. "admin:abc123,analyst:def456".
     api_keys: SecretStr = SecretStr("")
+    # Admin panel sign-in. Change the password in the panel or here (ADMIN_PASSWORD).
+    admin_email: str = "mehrialinia_ramin@yahoo.com"
+    admin_password: SecretStr = SecretStr("georisk-admin")
     public_read: bool = True  # read-only endpoints available without a key
     rate_limit_default: str = "240/minute"
     rate_limit_expensive: str = "20/minute"

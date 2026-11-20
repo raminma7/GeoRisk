@@ -3,23 +3,31 @@
 import useSWR, { SWRConfiguration } from "swr";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
-const KEY_STORAGE = "georisk.apiKey";
+const TOKEN_STORAGE = "georisk.adminToken";
+const listeners = new Set<() => void>();
 
-export function getApiKey(): string {
+/** Admin session token (set after signing in on /admin). */
+export function getToken(): string {
   try {
-    return localStorage.getItem(KEY_STORAGE) || "";
+    return localStorage.getItem(TOKEN_STORAGE) || "";
   } catch {
     return "";
   }
 }
 
-export function setApiKey(v: string) {
+export function setToken(v: string) {
   try {
-    if (v) localStorage.setItem(KEY_STORAGE, v);
-    else localStorage.removeItem(KEY_STORAGE);
+    if (v) localStorage.setItem(TOKEN_STORAGE, v);
+    else localStorage.removeItem(TOKEN_STORAGE);
   } catch {
-    /* storage unavailable: key is kept for this page only */
+    /* storage unavailable: the session lasts for this page only */
   }
+  listeners.forEach((f) => f());
+}
+
+export function onTokenChange(f: () => void): () => void {
+  listeners.add(f);
+  return () => { listeners.delete(f); };
 }
 
 export class ApiError extends Error {
@@ -30,8 +38,8 @@ export class ApiError extends Error {
 
 export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { "content-type": "application/json", ...(init.headers as Record<string, string>) };
-  const key = getApiKey();
-  if (key) headers["X-API-Key"] = key;
+  const token = getToken();
+  if (token) headers.authorization = `Bearer ${token}`;
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   const text = await res.text();
   let body: unknown = null;
@@ -40,6 +48,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
   } catch {
     body = text;
   }
+  if (res.status === 401 && token) setToken("");  // expired session: sign out
   if (!res.ok && res.status !== 501) throw new ApiError(res.status, body);
   return body as T;
 }

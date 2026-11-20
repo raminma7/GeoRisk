@@ -28,17 +28,24 @@ alerts and keeps a full history for machine learning. The dashboard populates it
 - Further docs: [`docs/architecture.md`](docs/architecture.md) · [`docs/methodology.md`](docs/methodology.md) ·
   [`docs/data-sources.md`](docs/data-sources.md) · [`docs/economy-roadmap.md`](docs/economy-roadmap.md)
 
-## Simple view and Analyst view
+## Pages and Admin panel
 
-Everyday readers see two pages: **Today** and **Early warning**. *Today* lists the situations going on, each with a
-plain headline ("Armed conflict in Ukraine and Russia"), a severity (Critical / High / Moderate / Low), a trend, two or
-three reasons in plain words, how well it is confirmed and the last 7 days of violent reports. It also shows what changed
-since yesterday and which peaceful countries could see a new conflict. Single-country crime/police news and weakly
-confirmed reports are grouped under "Other signals".
+The dashboard has two public pages:
+
+- **Today** (`/`): the Global Overview (live counts and the global event map with filters), then the situations going
+  on, each with a plain headline ("Armed conflict in Ukraine and Russia"), a severity (Critical / High / Moderate /
+  Low), a trend, two or three reasons in plain words, how well confirmed it is and the last 7 days of violent reports.
+  It also shows what changed since yesterday and which peaceful countries could see a new conflict. Clicking a
+  situation or a country opens its page.
+- **Early warning** (`/early-warning`): countries ranked by the model's risk of a new conflict.
 
 The wording is rule-based (`backend/app/monitoring/plain.py`, API `GET /api/v1/today`); no AI key is needed. Severity
-combines how intense the news is with verified deaths in the past 12 months (UCDP). The **Analyst view** switch in the
-header brings back every tool: scores, raw evidence, alerts, news, datasets, models and settings.
+combines how intense the news is with verified deaths in the past 12 months (UCDP).
+
+**Admin** (`/admin`): sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` (see `.env.example`; default password
+`georisk-admin`). The panel holds Settings (watchlist, thresholds, news queries, AI provider), data-collection health
+and **Change password**. A changed password is stored only as a hash in the database and replaces the `.env` value;
+changing it signs out other sessions. Settings changes always need this sign-in.
 
 ## Early warning (experimental ML)
 A separate **model service** ([`model-service/`](model-service)) serves a model that ranks countries without recent

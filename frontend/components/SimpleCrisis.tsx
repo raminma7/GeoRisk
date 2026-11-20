@@ -8,7 +8,6 @@ import { ActivityBars, ConfirmedBars, SeverityChip, Trend, type Story } from "@/
 import { SpilloverCard, type Prediction } from "@/components/EarlyWarning";
 import { Loading, SourceLink } from "@/components/ui";
 import { ago } from "@/lib/format";
-import { useView } from "@/lib/view";
 
 const WorldMap = dynamic(() => import("@/components/WorldMap"), { ssr: false, loading: () => <Loading what="map" /> });
 
@@ -18,7 +17,6 @@ export default function SimpleCrisis({ story, incidents, spillover, summary, cri
   story: Story; incidents: Incident[]; spillover: Prediction[]; summary: string | null;
   crisis: Story & { uid: string }; events?: never[]; fitTo?: [number, number][];
 }) {
-  const { setMode } = useView();
   const s = story;
   const total7 = s.activity.reduce((a, d) => a + d.violent, 0);
   return (
@@ -91,9 +89,6 @@ export default function SimpleCrisis({ story, incidents, spillover, summary, cri
             <WorldMap crises={[crisis]} events={events} height={240} fitTo={fitTo} />
           </section>
           {spillover?.length > 0 && <SpilloverCard items={spillover} />}
-          <p className="text-xs text-muted">
-            Want the scores, raw evidence and sources? <button className="link" onClick={() => setMode("analyst")}>Turn on Analyst view</button>
-          </p>
         </aside>
       </div>
     </div>

@@ -175,32 +175,6 @@ export function CountryRiskRow({ p, max, maxReasons = 3 }: { p: Prediction; max:
 }
 
 
-export function WatchListStrip({ data }: { data: { window: { start: string; end: string }; items: Prediction[] } }) {
-  return (
-    <section className="rounded-2xl border border-line bg-surface p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="h2">Early-warning watch list</h2><ExperimentalBadge />
-          <span className="text-xs text-muted">Risk of a new conflict · {monthRange(data.window)}</span>
-        </div>
-        <Link href="/early-warning" className="link text-sm">Full watch list →</Link>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        {data.items.map((p) => (
-          <Link key={p.iso3} href={`/geopolitics/countries/${p.iso3}`}
-            className="rounded-xl border border-line bg-raised p-3 transition hover:-translate-y-0.5 hover:border-accent hover:shadow-sm">
-            <div className="flex items-center justify-between text-xs text-muted"><span>#{p.rank}</span><LevelChip level={p.level} /></div>
-            <div className="mt-1 truncate font-medium">{p.name}</div>
-            <div className="mt-0.5"><TimesAverage value={p.times_average} /></div>
-            {p.reasons[0] && <div className="mt-2 truncate text-xs text-ink2" title={`${p.reasons[0].label}: ${p.reasons[0].value}`}>
-              <span className={p.reasons[0].direction === "raises" ? "text-crit" : "text-good"}>{p.reasons[0].direction === "raises" ? "↑" : "↓"}</span> {p.reasons[0].label}</div>}
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 export function CountryRiskCard({ risk }: { risk: (Prediction & { history: { window_start: string; times_average: number | null }[];
   explainer: { caveat: string } }) | null }) {
   if (!risk) return null;

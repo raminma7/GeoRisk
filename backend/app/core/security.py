@@ -13,12 +13,13 @@ import hmac
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Security, status
-from fastapi.security import APIKeyHeader
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import get_settings
 
 ROLE_RANK = {"viewer": 0, "analyst": 1, "admin": 2}
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+bearer = HTTPBearer(auto_error=False)
 
 
 @dataclass
@@ -36,7 +37,17 @@ def _lookup(key: str | None) -> Principal | None:
     return None
 
 
-def current_principal(key: str | None = Security(api_key_header)) -> Principal | None:
+def current_principal(key: str | None = Security(api_key_header),
+                      cred: HTTPAuthorizationCredentials | None = Security(bearer)) -> Principal | None:
+    if cred is not None:
+        from app.core import auth
+        from app.core.db import SessionLocal
+
+        with SessionLocal() as s:
+            email = auth.token_email(s, cred.credentials)
+        if email is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expired, please sign in again")
+        return Principal(role="admin", name=email)
     p = _lookup(key)
     if key and p is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid API key")
@@ -55,9 +66,10 @@ def require_role(role: str):
     def dep(p: Principal | None = Depends(current_principal)) -> Principal:
         settings = get_settings()
         if p is None:
-            if not settings.parsed_api_keys() and settings.environment == "development":
+            # Local convenience for analyst actions only; admin actions always need the admin sign-in.
+            if role != "admin" and not settings.parsed_api_keys() and settings.environment == "development":
                 return Principal(role="admin", name="local-dev")
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API key required")
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Admin sign-in required" if role == "admin" else "API key required")
         if ROLE_RANK.get(p.role, 0) < ROLE_RANK[role]:
             raise HTTPException(status.HTTP_403_FORBIDDEN, f"Requires role '{role}'")
         return p

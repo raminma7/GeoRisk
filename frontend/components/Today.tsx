@@ -4,16 +4,13 @@
    2–3 plain reasons, how well confirmed, last-7-days activity), what changed, and countries that could see a new
    conflict. Severity colours are the reserved status colours and always come with an icon + text label. */
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { LevelChip, monthRange, type Prediction } from "@/components/EarlyWarning";
 import { ErrorBox, Loading } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { ago } from "@/lib/format";
 
-const WorldMap = dynamic(() => import("@/components/WorldMap"), { ssr: false, loading: () => <Loading what="map" /> });
 
 export type Story = {
   id: number; uid: string; headline: string; kind: "conflict" | "tension" | "domestic"; kind_label: string;
@@ -183,7 +180,6 @@ function CouldStartSoon({ ew }: { ew: Today["could_start_soon"] }) {
 }
 
 export default function TodayView() {
-  const router = useRouter();
   const { data, error, isLoading, mutate } = useApi<Today>("/api/v1/today", { refreshInterval: 120_000 });
   const [all, setAll] = useState(false);
   if (error) return <ErrorBox error={error} retry={() => mutate()} />;
@@ -194,7 +190,7 @@ export default function TodayView() {
       <header className="space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">What is happening in the world</h1>
+            <h2 className="text-xl font-semibold tracking-tight">What is happening in the world</h2>
             <p className="text-sm text-muted">Updated automatically from news worldwide · latest report {ago(data.data_freshness.latest_event_available_at)}</p>
           </div>
         </div>
@@ -230,15 +226,6 @@ export default function TodayView() {
         </div>
 
         <aside className="space-y-4">
-          <section className="overflow-hidden rounded-2xl border border-line bg-surface">
-            <WorldMap crises={data.situations} height={260} onCrisisClick={(id) => router.push(`/geopolitics/crises/${id}`)} />
-            <div className="flex flex-wrap gap-3 px-4 py-2 text-[11px] text-muted">
-              {(["critical", "high", "elevated"] as const).map((l) => (
-                <span key={l} className="inline-flex items-center gap-1"><span className={`h-2 w-2 rounded-full ${SEV[l].bar}`} />
-                  {{ critical: "Critical", high: "High", elevated: "Moderate" }[l]}</span>
-              ))}
-            </div>
-          </section>
           <WhatChanged w={data.what_changed} />
           <CouldStartSoon ew={data.could_start_soon} />
           <details className="rounded-2xl border border-line bg-surface p-4 text-sm">

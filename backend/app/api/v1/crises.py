@@ -52,7 +52,12 @@ def list_crises(status: str | None = Query(None, description="candidate|active|d
     order = {"priority": desc(Crisis.current_priority), "recent": desc(Crisis.last_event_at),
              "first_observed": desc(Crisis.first_observed_at)}[sort]
     names, regions = country_names(s), region_names(s)
-    return paginate(s, q.order_by(order), p, lambda c: ser_crisis_card(c, regions.get(c.region_id), names))
+    page = paginate(s, q.order_by(order), p, lambda c: c)
+    crises = page["items"]
+    heads = {st["id"]: st for st in plain.stories(s, crises, with_activity=False)}
+    page["items"] = [{**ser_crisis_card(c, regions.get(c.region_id), names), "headline": heads[c.id]["headline"],
+                      "severity": heads[c.id]["severity"]} for c in crises]
+    return page
 
 
 def _spillover(s: Session, crisis_id: str) -> list[dict]:

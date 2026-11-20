@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 
-from app.api.v1 import analysis, countries, crises, datasets, economy, monitoring, news, predictions
+from app.api.v1 import analysis, auth, countries, crises, datasets, economy, monitoring, news, predictions
 from app.api.v1 import settings as settings_api
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -62,7 +62,7 @@ async def request_logging(request: Request, call_next):
 
 v1 = APIRouter(prefix="/api/v1")
 for r in (monitoring.router, countries.router, crises.router, news.router, analysis.router, datasets.router,
-          predictions.router, economy.router, settings_api.router):
+          predictions.router, economy.router, settings_api.router, auth.router):
     v1.include_router(r)
 app.include_router(v1)
 

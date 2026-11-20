@@ -140,19 +140,3 @@ export function SourceLink({ url, children }: { url?: string | null; children?: 
   return <a href={url} target="_blank" rel="noopener noreferrer nofollow" className="link text-xs">{children || host} ↗</a>;
 }
 
-export function Tabs({ tabs, active, onChange }: { tabs: { id: string; label: string; disabled?: boolean }[]; active: string; onChange: (id: string) => void }) {
-  return (
-    <div className="mb-4 flex flex-wrap gap-1 border-b border-line" role="tablist">
-      {tabs.map((t) => (
-        <button key={t.id} role="tab" aria-selected={active === t.id} disabled={t.disabled} onClick={() => onChange(t.id)}
-          className={`-mb-px border-b-2 px-3 py-2 text-sm ${active === t.id ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink"} disabled:cursor-not-allowed disabled:opacity-50`}>
-          {t.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function Disclaimer({ children }: { children: ReactNode }) {
-  return <p className="text-xs text-muted">{children}</p>;
-}
