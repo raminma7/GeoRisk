@@ -137,17 +137,19 @@ export function CountryRiskCard({ risk }: { risk: (Prediction & { outlook?: Coun
         <div className="rounded-xl bg-raised p-4 ring-1 ring-inset ring-line">
           <div className="text-xs text-muted">Next 3 months{o.window ? ` · ${monthRange(o.window)}` : ""}</div>
           <div className="mt-2"><OutlookChip direction={o.direction} chance={o.chance} size="md" /></div>
-          {o.direction !== "uncertain" && <div className="mt-1 text-sm font-medium">{o.label}</div>}
-          {o.note && <div className="mt-1 text-xs text-ink2">{o.note}</div>}
+          <div className="mt-1 text-sm font-medium">{o.label}</div>
         </div>
         {six && (
           <div className="rounded-xl bg-raised p-4 ring-1 ring-inset ring-line">
             <div className="text-xs text-muted">Next 6 months{six.window ? ` · ${monthRange(six.window)}` : ""}</div>
             <div className="mt-2"><OutlookChip direction={six.direction} chance={six.chance} size="md" /></div>
-            {six.direction !== "uncertain" && <div className="mt-1 text-sm font-medium">{six.label}</div>}
+            <div className="mt-1 text-sm font-medium">{six.label}</div>
           </div>
         )}
       </div>
+      {o.note && (
+        <p className="mt-4 rounded-lg bg-warn/10 px-3 py-2 text-xs text-ink2 ring-1 ring-inset ring-warn/30">{o.note}</p>
+      )}
       {(o.direction === "worse" || o.direction === "better") && o.reasons.length > 0 && (
         <div className="mt-4">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Why</h3>

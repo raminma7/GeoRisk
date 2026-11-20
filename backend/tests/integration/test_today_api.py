@@ -138,9 +138,9 @@ def test_crisis_index_live_from_news_and_deaths(db, monkeypatch):
     assert c["dimensions"]["tension"] < b["dimensions"]["tension"]   # shrunk towards the world average
 
 
-def test_guard_uses_the_same_trend_as_the_card(db, monkeypatch):
+def test_outlook_note_uses_the_same_trend_as_the_card(db, monkeypatch):
     """Iran case: the card says 'Getting worse' because the level rose since yesterday (direction 'stable'); the
-    outlook must then not say 'Could get better'."""
+    outlook keeps the model's 'Could get better' but explains it with what history says."""
     from datetime import date
 
     from app.crises.models import CrisisSnapshot
@@ -161,4 +161,4 @@ def test_guard_uses_the_same_trend_as_the_card(db, monkeypatch):
     monkeypatch.setattr(plain, "conflict_deaths_12m", lambda s: {"IRN": 24_000})
     assert plain.country_trends(db)["IRN"] == "up"
     o = P.outlooks(db, 3)["IRN"]
-    assert o["direction"] == "uncertain" and o["model_direction"] == "better"
+    assert o["direction"] == "better" and "faded within 3 months" in o["note"]

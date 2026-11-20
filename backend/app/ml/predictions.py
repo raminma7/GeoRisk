@@ -204,25 +204,29 @@ def _watchlist_alerts(session: Session, values: list[dict]) -> None:
 
 
 # ------------------------------------------------------------------ reads
-OUTLOOK_LABELS = {"worse": "Could get worse", "better": "Could get better", "same": "Likely to stay the same",
-                  "uncertain": "Uncertain"}
+OUTLOOK_LABELS = {"worse": "Could get worse", "better": "Could get better", "same": "Likely to stay the same"}
 LEVEL_ORDER = ["low", "elevated", "high", "critical"]
 SURGE_UP, SURGE_DOWN = 1.5, 0.6   # fighting news of the last 2 weeks vs the 90 days before
 
 
+# What followed sudden changes in fighting news historically (weekly samples 2014-2026, next 3 months; see
+# docs/escalation-model.md): after a 2-week surge (>=1.5x) countries got better in 64% of cases (35% normally) and
+# worse in 5% (11% normally); after a quiet spell (<=0.6x) they got worse in 21% of cases.
+FLARE_UP_FADED, QUIET_THEN_WORSE = 64, 21
+
+
 def guard(o: dict, trend: str | None, surge: float | None) -> dict:
-    """The outlook must not contradict this week's evidence. The models lean on verified deaths, which lag about two
-    months: 'better' while fighting is picking up now (or 'worse' while it is clearly calming) becomes 'uncertain'."""
+    """Never hide the model's outlook, but explain it when it goes against this week's trend (the models use
+    monthly data and verified deaths, which lag about two months)."""
     up = trend == "up" or (surge is not None and surge >= SURGE_UP)
     down = trend == "down" and (surge is None or surge <= SURGE_DOWN)
     if o["direction"] == "better" and up:
-        return {**o, "direction": "uncertain", "label": OUTLOOK_LABELS["uncertain"], "model_direction": "better",
-                "note": "The model expected improvement, but fighting has picked up in recent days."}
+        return {**o, "note": f"Fighting has picked up in recent days. Sudden flare-ups like this have usually faded "
+                             f"within 3 months ({FLARE_UP_FADED}% of past cases)."}
     if o["direction"] == "worse" and down:
-        return {**o, "direction": "uncertain", "label": OUTLOOK_LABELS["uncertain"], "model_direction": "worse",
-                "note": "The model expected a worsening, but it has been calmer in recent days."}
+        return {**o, "note": f"It has been calmer in recent days, but quiet spells have often been followed by a "
+                             f"worsening ({QUIET_THEN_WORSE}% of past cases, about twice the usual rate)."}
     return o
-
 
 def live_trends(session: Session) -> dict[str, str]:
     """'up' / 'down' per country: the same trend the country card shows ('Getting worse' / 'Calming down')."""

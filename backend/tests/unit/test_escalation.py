@@ -66,16 +66,17 @@ def test_index_labels_worse_better_and_limits():
     assert list(lab["idx_level"].iloc[[0, 4, 8]]) == [0, 2, 3]
 
 
-def test_guard_never_contradicts_this_weeks_news():
+def test_guard_explains_but_never_hides_the_outlook():
     from app.ml.predictions import guard
 
     better = {"direction": "better", "label": "Could get better", "chance": 0.87}
     worse = {"direction": "worse", "label": "Could get worse", "chance": 0.3}
-    # Iran case: the model expects improvement from lagged deaths, but fighting picked up this week
-    assert guard(better, "up", None)["direction"] == "uncertain"
-    assert guard(better, None, 1.8)["direction"] == "uncertain"
-    assert "picked up" in guard(better, "up", 1.0)["note"]
-    assert guard(better, "down", 0.9)["direction"] == "better"          # consistent with the news
-    assert guard(worse, "down", 0.5)["direction"] == "uncertain"        # clearly calmer now
-    assert guard(worse, "down", 1.2)["direction"] == "worse"            # calmer day, but fighting news still up
-    assert guard({"direction": "same", "label": "Likely to stay the same", "chance": 0.9}, "up", 2.0)["direction"] == "same"
+    # Iran case: the model expects improvement while fighting picked up this week -> keep it, explain with history
+    g = guard(better, "up", None)
+    assert g["direction"] == "better" and "64%" in g["note"]
+    assert "note" in guard(better, None, 1.8)
+    assert "note" not in guard(better, "down", 0.9)                     # consistent with the news: nothing to add
+    w = guard(worse, "down", 0.5)
+    assert w["direction"] == "worse" and "quiet spells" in w["note"]
+    assert "note" not in guard(worse, "down", 1.2)
+    assert "note" not in guard({"direction": "same", "label": "Likely to stay the same", "chance": 0.9}, "up", 2.0)

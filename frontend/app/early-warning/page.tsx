@@ -116,7 +116,6 @@ export default function EarlyWarningPage() {
   const tabs: ["" | Direction, string, number][] = [
     ["", "All", data.total], ["worse", OUTLOOK.worse.label, data.counts.worse || 0],
     ["better", OUTLOOK.better.label, data.counts.better || 0], ["same", OUTLOOK.same.label, data.counts.same || 0],
-    ["uncertain", OUTLOOK.uncertain.label, data.counts.uncertain || 0],
   ];
 
   return (
@@ -126,7 +125,7 @@ export default function EarlyWarningPage() {
           <span className="text-xs text-muted">Data through {monthLabel(m.data_through)}</span></div>
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Better or worse?</h1>
         <p className="mt-2 text-ink2">Where each country is heading in the next 3 months ({monthRange(m.window)}) and 6 months.</p>
-        <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-5" role="tablist" aria-label="Filter by outlook">
+        <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4" role="tablist" aria-label="Filter by outlook">
           {tabs.map(([d, l, n]) => (
             <button key={d || "all"} role="tab" aria-selected={direction === d} onClick={() => { setDirection(d); setShowAll(false); }}
               className={`rounded-xl border p-3 text-left transition ${direction === d ? "border-accent bg-accent/5" : "border-line bg-raised hover:border-accent/50"}`}>
@@ -143,7 +142,7 @@ export default function EarlyWarningPage() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="h2">Next 3 months</h2>
           <div className="flex flex-wrap items-center gap-3 text-xs text-ink2">
-            {(["worse", "better", "same", "uncertain"] as Direction[]).map((d) => (
+            {(["worse", "better", "same"] as Direction[]).map((d) => (
               <span key={d} className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm" style={{ background: OUTLOOK[d].fill }} />{OUTLOOK[d].label}</span>
             ))}
           </div>
@@ -176,8 +175,8 @@ export default function EarlyWarningPage() {
                   {(p.direction === "worse" || p.direction === "better") && p.to_tier && <div className="mt-0.5 text-[11px] text-muted">→ {TIER_LABEL[p.to_tier]}</div>}</div>
                 <div className="col-span-2 md:col-span-1">{p.six_months && <span className="mr-1 text-xs text-muted md:hidden">6 months:</span>}
                   {p.six_months && <OutlookChip direction={p.six_months.direction} chance={p.six_months.chance} />}</div>
-                <div className="col-span-2 min-w-0 md:col-span-1">{p.direction === "uncertain" ? <span className="text-xs text-ink2">{p.note}</span>
-                  : p.direction !== "same" && <ReasonList reasons={p.reasons} max={2} compact towardsBetter={p.direction === "better"} />}</div>
+                <div className="col-span-2 min-w-0 md:col-span-1">{p.direction !== "same" && <ReasonList reasons={p.reasons} max={2} compact towardsBetter={p.direction === "better"} />}
+                  {p.note && <div className="mt-1 text-xs text-ink2"><span aria-hidden className="text-warn">●</span> {p.note}</div>}</div>
               </Link>
             ))}
           </div>

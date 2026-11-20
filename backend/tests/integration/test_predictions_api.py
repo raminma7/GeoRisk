@@ -42,7 +42,7 @@ def test_outlook_for_every_country_with_filters(db):
     assert got == {"POL": ("low", "worse"), "BLR": ("elevated", "better"), "MDA": ("low", "same"),
                    "UKR": ("critical", "same")}
     assert [i["iso3"] for i in wl["items"]][:2] == ["POL", "BLR"]  # worse first, then better, then same
-    assert wl["counts"] == {"worse": 1, "uncertain": 0, "better": 1, "same": 2}
+    assert wl["counts"] == {"worse": 1, "better": 1, "same": 2}
     assert wl["meta"]["window"] == {"start": "2026-10-01", "end": "2026-12-01"}
     assert wl["items"][0]["six_months"]["direction"] == "worse" and wl["items"][0]["chance"] == 0.2
     assert wl["items"][0]["reasons"][0]["label"] == "Neighbours at war"

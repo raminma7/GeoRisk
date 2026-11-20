@@ -88,13 +88,13 @@ def country_risk(session: Session, iso3: str) -> dict | None:
             "outlook": o3, "outlook_6m": o6, "history": P.history(session, iso3), "explainer": EXPLAINER}
 
 
-DIRECTION_ORDER = {"worse": 0, "uncertain": 1, "better": 2, "same": 3}
+DIRECTION_ORDER = {"worse": 0, "better": 1, "same": 2}
 TIER_ORDER = {"critical": 0, "high": 1, "elevated": 2, "low": 3}
 
 
 @router.get("", summary="Outlook for every country: could get worse, could get better, or likely to stay the same")
 def watch_list(limit: int = Query(300, ge=1, le=300), region: str | None = None,
-               direction: str | None = Query(None, pattern="^(worse|better|same|uncertain)$"),
+               direction: str | None = Query(None, pattern="^(worse|better|same)$"),
                s: Session = Depends(get_db), _: Principal = Depends(require_read)):
     meta = _meta(s)
     if meta is None:
