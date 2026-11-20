@@ -36,9 +36,46 @@ def test_wording_helpers():
     assert plain.confidence({"evidence_confidence_label": "high", "independent_sources_24h": 141})["label"] == "Well confirmed"
 
 
-def test_incident_sentence_is_readable():
+def side(kind=None, iso3=None, country=None, igo=None):
+    return {"kind": kind, "iso3": iso3, "country": country, "igo": igo}
+
+
+def event(a, b, place="Tehran, Iran", iso3="IRN", country="Iran"):
+    return {"a": a, "b": b, "place": place, "place_iso3": iso3, "place_country": country}
+
+
+def test_capitals_and_cities_are_named_by_their_country():
+    # GDELT codes "TEHRAN" as an actor with nationality IRN; we never print the raw "Tehran".
     cl = SimpleNamespace(event_root_code="19", quad_class=4)
-    ev = SimpleNamespace(actor1_name="RUSSIAN", actor2_name="UKRAINIAN", action_location="Kharkiv, Ukraine")
-    assert plain.incident_sentence(cl, ev) == "Fighting in Kharkiv, Ukraine — Russian against Ukrainian"
+    d = event(side("country", "IRN", "Iran"), side("country", "KWT", "Kuwait"))
+    assert plain.incident_sentence(cl, d) == "Fighting in Tehran, Iran — Iran against Kuwait"
+    same = event(side("country", "IRN", "Iran"), side("country", "IRN", "Iran"))  # "Iran against Tehran"
+    assert plain.incident_sentence(cl, same) == "Fighting in Tehran, Iran"
+
+
+def test_same_country_sides_read_as_internal_roles():
+    cl = SimpleNamespace(event_root_code="19", quad_class=4)
+    d = event(side("government", None, None), side("military", "IRN", "Iran"))
+    assert plain.incident_sentence(cl, d) == "Fighting in Tehran, Iran — the government against the military"
+    war = event(side("country", "RUS", "Russia"), side("country", "UKR", "Ukraine"),
+                place="Okhrimivka, Ukraine", iso3="UKR", country="Ukraine")
+    assert plain.incident_sentence(cl, war) == "Fighting in Okhrimivka, Ukraine — Russia against Ukraine"
+    us = event(side("military", "USA", "United States"), side("country", "CHN", "China"), place="China", iso3="CHN",
+               country="China")
+    assert plain.incident_sentence(cl, us) == "Fighting in China — the military of the United States against China"
+
+
+def test_vague_or_implausible_actors_are_left_out():
+    attack = SimpleNamespace(event_root_code="18", quad_class=4)
+    d = event(side("judiciary", None, None), side("media", None, None), place="Kerala, India", iso3="IND", country="India")
+    assert plain.incident_sentence(attack, d) == "Attack in Kerala, India"  # "attack by the courts" is a misreading
+    nowhere = event(side("business"), side(), place=None, iso3=None, country=None)
+    assert plain.incident_sentence(attack, nowhere) is None
     talks = SimpleNamespace(event_root_code="16", quad_class=3)
-    assert plain.incident_sentence(talks, None) == "Relations cut or sanctions"
+    assert plain.incident_sentence(talks, None) is None
+
+
+def test_place_is_shortened():
+    assert plain.short_place("Kyiv, Kyyiv, Misto, Ukraine", "Ukraine") == "Kyiv, Ukraine"
+    assert plain.short_place("Bangladesh (general), Bangladesh", "Bangladesh") == "Bangladesh"
+    assert plain.the("United States") == "the United States" and plain.the("Iran") == "Iran"

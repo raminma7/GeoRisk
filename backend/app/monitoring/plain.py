@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.db import utcnow
 from app.crises.models import Crisis, CrisisEvent
 from app.geopolitics.models import EventCluster, NormalizedGeopoliticalEvent, UcdpEvent
-from app.registry.models import Country
+from app.registry.models import Actor, Country
 
 ACTIVE = ["candidate", "active"]
 LEVEL_RANK = {"low": 0, "elevated": 1, "high": 2, "critical": 3}
@@ -273,11 +273,17 @@ def recent_incidents(s: Session, crisis_id: int, hours: int = 72, limit: int = 8
                 EventCluster.event_root_code.in_(INCIDENT_ROOTS),
                 func.cardinality(EventCluster.source_domains) >= 2)
          .order_by(desc(EventCluster.max_severity * func.least(func.cardinality(EventCluster.source_domains), 20)))
-         .limit(limit * 3))
+         .limit(limit * 4))
+    rows = s.execute(q).all()
+    events = [ev for _, ev in rows if ev is not None]
+    actor_ids = {a for ev in events for a in (ev.actor1_id, ev.actor2_id) if a}
+    actors = {aid: (t, cid) for aid, t, cid in s.execute(
+        select(Actor.id, Actor.actor_type, Actor.country_id).where(Actor.id.in_(actor_ids))).all()} if actor_ids else {}
+    countries = {cid: (iso3, name) for cid, iso3, name in s.execute(select(Country.id, Country.iso3, Country.name)).all()}
     out, seen = [], set()
-    for cl, ev in s.execute(q).all():
-        text_ = incident_sentence(cl, ev)
-        if text_ in seen:
+    for cl, ev in rows:
+        text_ = incident_sentence(cl, describe_event(ev, actors, countries) if ev else None)
+        if text_ is None or text_ in seen:
             continue
         seen.add(text_)
         out.append({"id": cl.id, "text": text_, "when": cl.last_seen_at.isoformat() if cl.last_seen_at else None,
@@ -288,6 +294,76 @@ def recent_incidents(s: Session, crisis_id: int, hours: int = 72, limit: int = 8
     return out
 
 
+# GDELT actor roles a reader understands. "of" roles belong to a state ("military of Russia"); "in" roles are people
+# or groups located in a country ("police in Nigeria"). Other roles (media, business, "unknown", ...) are too vague
+# to name and are left out of the sentence.
+ROLE_OF = {"government": "government", "military": "military", "intelligence": "intelligence services",
+           "legislature": "parliament", "judiciary": "courts"}
+ROLE_IN = {"police": "police", "rebel": "rebels", "insurgent": "insurgents", "armed_group": "an armed group",
+           "separatist": "separatists", "radical_group": "a radical group", "opposition": "opposition",
+           "civilian": "civilians", "refugees": "refugees", "migrants": "migrants", "criminal": "criminals",
+           "labor": "workers", "education": "students"}
+
+
+THE_COUNTRIES = {"Netherlands", "Philippines", "Bahamas", "Gambia", "Maldives", "Comoros", "Czech Republic",
+                 "Central African Republic", "Dominican Republic", "Marshall Islands", "Solomon Islands", "Vatican"}
+# Roles that do not plausibly carry out armed violence themselves; named as the attacker they are usually a misreading.
+NOT_VIOLENT_ROLES = {"judiciary", "legislature", "education", "labor", "refugees", "migrants"}
+
+
+def the(name: str | None) -> str | None:
+    """'United States' -> 'the United States' when a country is named inside a sentence."""
+    if name and (name.startswith(("United ", "Democratic Republic")) or name in THE_COUNTRIES):
+        return f"the {name}"
+    return name
+
+
+def actor_label(kind: str | None, country: str | None, fallback_country: str | None = None,
+                igo_name: str | None = None) -> tuple[str | None, str | None]:
+    """(full label, role-only label) for one actor; (None, None) when the actor is too vague to name.
+
+    Actors coded only by nationality are named by their country, never by the raw text: GDELT often uses a capital
+    or a city for its country ("Tehran" -> Iran, "Seoul" -> South Korea)."""
+    if kind == "igo" and igo_name:
+        n = igo_name[4:] if igo_name.lower().startswith("the ") else igo_name
+        n = the(n) if n.startswith("United ") else (f"the {n}" if n.startswith("European") else n)
+        return n, n
+    c = the(country or fallback_country)
+    if kind in ("country", "state", "unknown") and country:
+        return the(country), None
+    if kind in ROLE_OF:
+        return (f"the {ROLE_OF[kind]} of {c}" if c else f"the {ROLE_OF[kind]}"), f"the {ROLE_OF[kind]}"
+    if kind in ROLE_IN:
+        return (f"{ROLE_IN[kind]} in {c}" if c else ROLE_IN[kind]), ROLE_IN[kind]
+    return None, None
+
+
+def short_place(location: str | None, country: str | None) -> str | None:
+    """'Kyiv, Kyyiv, Misto, Ukraine' -> 'Kyiv, Ukraine'; 'Bangladesh (general), Bangladesh' -> 'Bangladesh'."""
+    if not location:
+        return country
+    parts = [p.replace("(general)", "").strip() for p in location.split(",")]
+    parts = [p for p in parts if p]
+    if not parts:
+        return country
+    first, last = parts[0], country or parts[-1]
+    return first if first == last else f"{first}, {last}"
+
+
+def describe_event(ev: NormalizedGeopoliticalEvent, actors: dict, countries: dict) -> dict:
+    def side(aid, ev_country_id, raw_name):
+        kind, a_cid = actors.get(aid, (None, None))
+        cid = ev_country_id or a_cid
+        iso3, name = countries.get(cid, (None, None))
+        return {"kind": kind, "iso3": iso3, "country": name,
+                "igo": _clean(raw_name) if kind == "igo" else None}
+
+    act_iso3, act_name = countries.get(ev.action_country_id, (None, None))
+    return {"a": side(ev.actor1_id, ev.actor1_country_id, ev.actor1_name),
+            "b": side(ev.actor2_id, ev.actor2_country_id, ev.actor2_name),
+            "place": short_place(ev.action_location, act_name), "place_iso3": act_iso3, "place_country": act_name}
+
+
 def _clean(name: str | None) -> str | None:
     if not name:
         return None
@@ -295,14 +371,47 @@ def _clean(name: str | None) -> str | None:
     return n.title() if n.isupper() else n
 
 
-def incident_sentence(cl: EventCluster, ev: NormalizedGeopoliticalEvent | None) -> str:
+def incident_sentence(cl: EventCluster, d: dict | None) -> str | None:
+    """One readable line per incident: "<what> in <place> — <side A> against <side B>".
+
+    - Actors are named by role and country, never by GDELT's raw text.
+    - Sides from the country where it happened are named by role only ("police", "the government"); when both sides
+      are from that one country the line describes an internal event.
+    - Actors too vague to name are left out; an incident with neither a place nor a nameable actor is dropped."""
     what = INCIDENT_WORDS.get(cl.event_root_code or "", "Incident")
-    a1 = _clean(ev.actor1_name) if ev else None
-    a2 = _clean(ev.actor2_name) if ev else None
-    place = _clean(ev.action_location) if ev else None
-    s = what + (f" in {place}" if place else "")
-    if a1 and a2 and a1 != a2:
-        s += f" — {a1} against {a2}" if cl.quad_class in (3, 4) else f" — {a1} and {a2}"
-    elif a1 or a2:
-        s += f" — involving {a1 or a2}"
-    return s
+    if not d:
+        return None
+    a, b = d["a"], d["b"]
+    hostile = cl.quad_class in (3, 4)
+    violent = (cl.event_root_code or "") in ("18", "19", "20")
+    joiner = " against " if hostile else " and "
+    place, place_iso3 = d["place"], d["place_iso3"]
+
+    def name(x):
+        if violent and x["kind"] in NOT_VIOLENT_ROLES:
+            return None, None, None
+        full, role = actor_label(x["kind"], x["country"], d["place_country"], x["igo"])
+        iso = x["iso3"] or (place_iso3 if role and x["kind"] != "igo" else None)
+        return full, role, iso
+
+    a_full, a_role, a_iso = name(a)
+    b_full, b_role, b_iso = name(b)
+    foreign = any(f and i and i != place_iso3 for f, i in ((a_full, a_iso), (b_full, b_iso)))
+
+    def short(full, role, iso):
+        # A side from the country where it happened is named by role only ("police", "the government"). A bare
+        # country adds nothing there, unless the other side is foreign ("Russia against Ukraine").
+        if full and iso and iso == place_iso3 and not (role is None and foreign):
+            return role
+        return full
+
+    a_name, b_name = short(a_full, a_role, a_iso), short(b_full, b_role, b_iso)
+    head = what + (f" in {place}" if place else "")
+    if not place and a_iso and a_iso == b_iso:
+        head = f"{what} inside {the(a['country'] or b['country'])}"
+    if a_name and b_name and a_name != b_name:
+        return f"{head} — {a_name}{joiner}{b_name}"
+    one = a_name or b_name
+    if one:
+        return f"{head} — {'by' if a_name else 'involving'} {one}"
+    return head if place else None
