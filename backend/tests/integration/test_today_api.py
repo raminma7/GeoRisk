@@ -136,3 +136,29 @@ def test_crisis_index_live_from_news_and_deaths(db, monkeypatch):
     assert a["dimensions"]["violence"] == 100 and a["level"] == "critical"
     assert b["dimensions"]["tension"] > 95 and b["dimensions"]["momentum"] > 60 and b["level"] != "low"
     assert c["dimensions"]["tension"] < b["dimensions"]["tension"]   # shrunk towards the world average
+
+
+def test_guard_uses_the_same_trend_as_the_card(db, monkeypatch):
+    """Iran case: the card says 'Getting worse' because the level rose since yesterday (direction 'stable'); the
+    outlook must then not say 'Could get better'."""
+    from datetime import date
+
+    from app.crises.models import CrisisSnapshot
+    from app.ml import predictions as P
+    from app.ml.models import MlPrediction
+
+    add(db, "CR-9", ["IRN", "USA"], ["IRN"], "critical", 40, 300, conf="high")
+    db.flush()
+    cid = db.query(Crisis).filter_by(uid="CR-9").one().id
+    db.add(CrisisSnapshot(crisis_id=cid, as_of=utcnow() - timedelta(hours=25), priority=60, priority_level="high",
+                          direction="stable", indicators={}, participants=[]))
+    for model, prob, status in ((P.MODELS[3], 0.01, "predicted"), (P.CALM_MODELS[3], 0.87, "predicted")):
+        db.add(MlPrediction(model_name=model, model_version="vT", iso3="IRN", window_start=date(2026, 10, 1),
+                            window_end=date(2026, 12, 1), data_through=date(2026, 9, 1), status=status,
+                            current_tier="critical", probability=prob, raw_score=prob, rank=1, out_of=1,
+                            times_average=1.0, level="low", reasons=[]))
+    db.commit()
+    monkeypatch.setattr(plain, "conflict_deaths_12m", lambda s: {"IRN": 24_000})
+    assert plain.country_trends(db)["IRN"] == "up"
+    o = P.outlooks(db, 3)["IRN"]
+    assert o["direction"] == "uncertain" and o["model_direction"] == "better"

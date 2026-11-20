@@ -206,6 +206,7 @@ def _watchlist_alerts(session: Session, values: list[dict]) -> None:
 # ------------------------------------------------------------------ reads
 OUTLOOK_LABELS = {"worse": "Could get worse", "better": "Could get better", "same": "Likely to stay the same",
                   "uncertain": "Uncertain"}
+LEVEL_ORDER = ["low", "elevated", "high", "critical"]
 SURGE_UP, SURGE_DOWN = 1.5, 0.6   # fighting news of the last 2 weeks vs the 90 days before
 
 
@@ -224,20 +225,10 @@ def guard(o: dict, trend: str | None, surge: float | None) -> dict:
 
 
 def live_trends(session: Session) -> dict[str, str]:
-    """'up' / 'down' per country from the followed situations taking place there (24h vs the days before)."""
-    from app.crises.models import Crisis
+    """'up' / 'down' per country: the same trend the country card shows ('Getting worse' / 'Calming down')."""
+    from app.monitoring.plain import country_trends
 
-    out: dict[str, str] = {}
-    for c in session.scalars(select(Crisis).where(Crisis.status.in_(["candidate", "active"]),
-                                                  Crisis.direction.in_(["escalating", "de_escalating"]))):
-        for iso in c.location_country_iso3s or []:
-            if c.direction == "escalating":
-                out[iso] = "up"
-            elif out.get(iso) != "up":
-                out[iso] = "down"
-    return out
-LEVEL_ORDER = ["low", "elevated", "high", "critical"]
-
+    return country_trends(session)
 
 def outlook(worse: MlPrediction | None, better: MlPrediction | None, t_worse: float, t_better: float) -> dict:
     """One direction per country from the two models: 'worse' / 'better' when that model's probability passes its

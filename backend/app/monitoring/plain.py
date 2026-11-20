@@ -323,6 +323,23 @@ def _dimension_reasons(ix: dict | None) -> list[str]:
     return [t for _, t in sorted(out, key=lambda x: -x[0])]
 
 
+def country_trends(s: Session, sts: list[dict] | None = None) -> dict[str, str]:
+    """'up' / 'down' per country, exactly as the country card shows it ('Getting worse' / 'Calming down'): the worst
+    trend of the followed situations taking place there (main situations first)."""
+    sts = sts if sts is not None else active_stories(s)
+    by: dict[str, list[dict]] = {}
+    for st in sts:
+        for iso in st["locations"]:
+            by.setdefault(iso, []).append(st)
+    out = {}
+    for iso, group in by.items():
+        use = [g for g in group if g["group"] == "main"] or group
+        t = max((g["trend"]["code"] for g in use), key=lambda x: TREND_RANK[x])
+        if t != "flat":
+            out[iso] = t
+    return out
+
+
 def country_stories(s: Session, sts: list[dict], now: datetime | None = None) -> list[dict]:
     """One card per country: "Crisis in <country>", with the level from the crisis index (violence, military
     activity, tension, unrest, change vs normal).
